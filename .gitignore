@@ -31,13 +31,38 @@ env/
 outputs/*
 !outputs/README.md
 !outputs/.gitkeep
+outputs/parsed/
+outputs/session_cards/
+outputs/submissions/
+outputs/api_tests/**/raw/
+outputs/api_tests/**/parsed/
 
 # Raw packet captures and downloaded datasets stay local.
 datasets/raw/
+datasets/public/**/*.pcap
+datasets/public/**/*.pcapng
+datasets/public/**/*.cap
+datasets/public/**/*.binetflow
+datasets/public/**/*.csv
+!datasets/metadata/*.csv
+!datasets/public/**/metadata/*.csv
 *.pcap
 *.pcapng
 *.cap
 *.pcap.zip
+*.zip
+*.tar.gz
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+adapter_model*
+lora_adapter*/
+*HF_TOKEN*
+*LLM_API_KEY*
+*TOKEN*
+*token*
 
 # Micro-test generated artifacts and local captures
 微型test_v1/

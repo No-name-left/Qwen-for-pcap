@@ -81,18 +81,30 @@ def retrieve(queries: list[dict], chunks: list[dict], top_k: int) -> list[dict]:
                     "text": chunk["text"][:800],
                 }
             )
-        out.append({"event_id": query.get("event_id", query.get("query_id")), "query": query.get("query", ""), "query_terms": query.get("query_terms", []), "low_signal": query.get("low_signal", False), "snippets": snippets})
+        item_id = query.get("record_id", query.get("event_id", query.get("query_id")))
+        out.append(
+            {
+                "record_id": item_id,
+                "event_id": item_id,
+                "pcap_id": query.get("pcap_id"),
+                "record_type": query.get("record_type"),
+                "query": query.get("query", ""),
+                "query_terms": query.get("query_terms", []),
+                "low_signal": query.get("low_signal", False),
+                "snippets": snippets,
+            }
+        )
     return out
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Retrieve RAG snippets with keyword + metadata scoring.")
     parser.add_argument("--event-cards", type=Path, default=micro_path("outputs/event_cards/qwen_test_event_cards.json"))
-    parser.add_argument("--queries", type=Path, default=ROOT / "outputs/rag_queries/qwen35_27b_test_rag_queries.jsonl")
+    parser.add_argument("--queries", type=Path, default=ROOT / "outputs/rag_queries/qwen35_session_records_rag_queries.jsonl")
     parser.add_argument("--chunks", type=Path, default=ROOT / "rag/chunks/rag_chunks.jsonl")
     parser.add_argument("--index", type=Path, default=ROOT / "rag/index/keyword_index.json")
-    parser.add_argument("--output", type=Path, default=ROOT / "outputs/rag_retrieval/qwen35_27b_test_retrieved_knowledge_top5.json")
-    parser.add_argument("--report", type=Path, default=ROOT / "outputs/rag_retrieval/qwen35_27b_test_retrieval_report_top5.md")
+    parser.add_argument("--output", type=Path, default=ROOT / "outputs/rag_retrieval/qwen35_session_records_retrieved_knowledge_top5.json")
+    parser.add_argument("--report", type=Path, default=ROOT / "outputs/rag_retrieval/qwen35_session_records_retrieval_report_top5.md")
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--retriever-mode", default="keyword", choices=["keyword", "vector", "hybrid"])
     args = parser.parse_args()
@@ -104,16 +116,16 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     lines = [
-        "# Qwen3.5-27B RAG retrieval report",
+        "# Qwen3.5-27B session-record RAG retrieval report",
         "",
         f"- Retriever mode: {args.retriever_mode}",
         f"- Top K: {args.top_k}",
-        f"- Events: {len(results)}",
+        f"- Records: {len(results)}",
         f"- Output: `{args.output.relative_to(ROOT)}`",
         "",
     ]
     for item in results[:60]:
-        lines.append(f"## {item['event_id']}")
+        lines.append(f"## {item['record_id']}")
         lines.append("")
         lines.append(f"- low_signal: {item.get('low_signal')}")
         lines.append(f"- query_terms: {', '.join(map(str, item.get('query_terms', [])[:30]))}")
