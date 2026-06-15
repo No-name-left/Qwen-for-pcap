@@ -129,6 +129,29 @@ def load_record_id_filter(value: str | None) -> set[str] | None:
     return {item.strip() for item in value.split(",") if item.strip()}
 
 
+def load_existing_parsed_results(parsed_dir: Path, result_path: Path) -> dict[str, dict[str, Any]]:
+    existing: dict[str, dict[str, Any]] = {}
+    candidates = sorted(parsed_dir.glob("*.json"))
+    if result_path.exists():
+        candidates.append(result_path)
+    for path in candidates:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(data, dict):
+            data = [data]
+        if not isinstance(data, list):
+            continue
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            rid = item.get("record_id") or item.get("session_id")
+            if rid:
+                existing[str(rid)] = item
+    return existing
+
+
 def code_set_for_name(name: str) -> set[str] | None:
     low = name.lower()
     if "technique" in low:
@@ -180,12 +203,14 @@ def main() -> int:
     parser.add_argument("--max-files", type=int)
     parser.add_argument("--temperature", type=float)
     parser.add_argument("--max-tokens", type=int)
+    parser.add_argument("--timeout-seconds", type=float)
     parser.add_argument("--sleep-seconds", type=float, default=0.0)
     parser.add_argument("--require-run-api-flag", action="store_true")
     parser.add_argument("--retry-failed-once", action="store_true")
     parser.add_argument("--continue-on-error", action="store_true")
     parser.add_argument("--failed-records-out", type=Path)
     parser.add_argument("--only-record-ids")
+    parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     load_env_file(ROOT / ".env")
     cfg = load_config(args.config)
@@ -245,7 +270,7 @@ def main() -> int:
         prompts = prompts[: args.max_files]
     if not prompts:
         raise FileNotFoundError(f"no prompt files in {args.prompt_dir}")
-    request_timeout = float(
+    request_timeout = args.timeout_seconds if args.timeout_seconds is not None else float(
         os.environ.get("LLM_REQUEST_TIMEOUT", generation.get("request_timeout_seconds", cfg.get("request_timeout", 180)))
     )
     client = OpenAI(base_url=base_url, api_key=api_key, timeout=request_timeout)
@@ -255,16 +280,31 @@ def main() -> int:
     raw_dir.mkdir(parents=True, exist_ok=True)
     parsed_dir.mkdir(parents=True, exist_ok=True)
     allowed_codes = code_set_for_name(args.prompt_dir.name) or code_set_for_name(args.output_dir.name)
-    all_results = []
+    result_path = args.output_dir / args.result_name
+    existing_results = load_existing_parsed_results(parsed_dir, result_path) if args.resume else {}
+    all_results = list(existing_results.values())
     rows = []
     json_parse_failures = 0
     invalid_code_count = 0
     error_counts: dict[str, int] = {}
     failed_records: list[dict[str, Any]] = []
     stop_after_batch = False
+    api_calls_attempted = 0
     for idx, (prompt_path, record_id, prompt_text) in enumerate(prompts, start=1):
         raw_path = raw_dir / f"raw_batch_{idx:03d}.txt"
         parsed_path = parsed_dir / f"parsed_batch_{idx:03d}.json"
+        if args.resume and record_id in existing_results:
+            rows.append({
+                "batch": idx,
+                "record_id": record_id,
+                "prompt": str(prompt_path.resolve().relative_to(ROOT)),
+                "status": "skipped_existing",
+                "error": "",
+                "error_category": "",
+                "records": 1,
+                "invalid_codes": 0,
+            })
+            continue
         status = "failed"
         error = ""
         content = ""
@@ -272,6 +312,7 @@ def main() -> int:
         invalid_codes_for_batch = 0
         for attempt in range(args.retries + 1):
             try:
+                api_calls_attempted += 1
                 response = client.chat.completions.create(
                     model=model,
                     messages=[{"role": "user", "content": prompt_text}],
@@ -331,7 +372,8 @@ def main() -> int:
             f"- Max files: {args.max_files if args.max_files is not None else 'all'}",
             f"- Batches observed so far: {len(rows)}",
             f"- Successful batches so far: {sum(1 for r in rows if r['status']=='success')}",
-            f"- Failed batches so far: {sum(1 for r in rows if r['status']!='success')}",
+            f"- Skipped existing batches so far: {sum(1 for r in rows if r['status']=='skipped_existing')}",
+            f"- Failed batches so far: {sum(1 for r in rows if r['status'] not in {'success', 'skipped_existing'})}",
             f"- JSON parse failures so far: {json_parse_failures}",
             f"- Invalid code count so far: {invalid_code_count}",
             f"- HTTP/API error counts so far: `{json.dumps(error_counts, sort_keys=True)}`",
@@ -347,14 +389,15 @@ def main() -> int:
             break
         if args.sleep_seconds > 0 and idx < len(prompts):
             time.sleep(args.sleep_seconds)
-    result_path = args.output_dir / args.result_name
     if all_results:
         result_path.write_text(json.dumps(all_results, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     summary_path = args.output_dir / args.summary_name
     stats = {
         "batches": len(rows),
         "success": sum(1 for r in rows if r["status"] == "success"),
-        "failed": sum(1 for r in rows if r["status"] != "success"),
+        "failed": sum(1 for r in rows if r["status"] not in {"success", "skipped_existing"}),
+        "skipped_existing": sum(1 for r in rows if r["status"] == "skipped_existing"),
+        "api_calls_attempted": api_calls_attempted,
         "json_parse_failures": json_parse_failures,
         "invalid_code_count": invalid_code_count,
         "error_counts": error_counts,
@@ -373,7 +416,9 @@ def main() -> int:
         f"- Base URL host: `{safe_host(base_url)}`",
         f"- Batches: {len(rows)}",
         f"- Successful batches: {stats['success']}",
+        f"- Skipped existing batches: {stats['skipped_existing']}",
         f"- Failed batches: {stats['failed']}",
+        f"- API calls attempted: {api_calls_attempted}",
         f"- JSON parse failures: {json_parse_failures}",
         f"- Invalid code count: {invalid_code_count}",
         f"- HTTP/API error counts: `{json.dumps(error_counts, sort_keys=True)}`",
@@ -386,7 +431,7 @@ def main() -> int:
             lines.append(f"  error: {row['error']}")
     summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"wrote {len(all_results)} parsed records")
-    return 0 if all(r["status"] == "success" for r in rows) else 1
+    return 0 if all(r["status"] in {"success", "skipped_existing"} for r in rows) else 1
 
 
 if __name__ == "__main__":

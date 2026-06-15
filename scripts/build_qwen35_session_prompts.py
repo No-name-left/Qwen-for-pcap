@@ -56,7 +56,6 @@ def compact_record(record: dict[str, Any]) -> dict[str, Any]:
         "unique_dst_ports",
         "dst_ports_sample",
         "failed_conn_rate",
-        "candidate_hint",
     ]
     return {key: record.get(key) for key in keys if key in record}
 
