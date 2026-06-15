@@ -6,6 +6,13 @@ OUT_DIR="$ROOT/outputs"
 REPORT="$OUT_DIR/env_check_report.md"
 mkdir -p "$OUT_DIR"
 
+if [ -f "$ROOT/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$ROOT/.env"
+  set +a
+fi
+
 status_for_cmd() {
   local name="$1"
   if command -v "$name" >/dev/null 2>&1; then
@@ -48,9 +55,11 @@ fi
 llm_base_url_set=false
 llm_model_name_set=false
 llm_api_key_set=false
+hf_token_set=false
 if [ -n "${LLM_BASE_URL:-}" ]; then llm_base_url_set=true; fi
 if [ -n "${LLM_MODEL_NAME:-}" ]; then llm_model_name_set=true; fi
 if [ -n "${LLM_API_KEY:-}" ]; then llm_api_key_set=true; fi
+if [ -n "${HF_TOKEN:-}" ] || [ -n "${HUGGINGFACEHUB_API_TOKEN:-}" ]; then hf_token_set=true; fi
 
 {
   echo "# Environment check report"
@@ -77,6 +86,7 @@ if [ -n "${LLM_API_KEY:-}" ]; then llm_api_key_set=true; fi
   echo "| LLM_BASE_URL | $llm_base_url_set | no |"
   echo "| LLM_MODEL_NAME | $llm_model_name_set | no |"
   echo "| LLM_API_KEY | $llm_api_key_set | no |"
+  echo "| HF_TOKEN / HUGGINGFACEHUB_API_TOKEN | $hf_token_set | no |"
   echo
   echo "No OpenAI-compatible, Hugging Face, or other online model endpoint was called."
 } > "$REPORT"

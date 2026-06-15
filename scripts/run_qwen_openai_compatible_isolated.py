@@ -13,11 +13,48 @@ from openai import OpenAI
 from qwen35_rag_utils import ROOT, parse_json_array
 
 
+def load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def cfg_value(cfg: dict, key: str):
     value = cfg.get(key)
     if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
         return os.environ.get(value[2:-1])
     return value
+
+
+def nested_cfg_value(cfg: dict, section: str, key: str):
+    value = cfg.get(section, {})
+    if isinstance(value, dict):
+        return value.get(key)
+    return None
+
+
+def env_from_config(cfg: dict, section: str, key: str):
+    env_name = nested_cfg_value(cfg, section, key) or cfg.get(key)
+    if env_name:
+        return os.environ.get(env_name)
+    return None
+
+
+def api_key_from_env(cfg: dict):
+    return (
+        os.environ.get("LLM_API_KEY")
+        or env_from_config(cfg, "provider", "api_key_env")
+        or os.environ.get("HF_TOKEN")
+        or os.environ.get("HUGGINGFACEHUB_API_TOKEN")
+    )
 
 
 def call_model(prompt: str, cfg: dict, queue: mp.Queue) -> None:
@@ -45,15 +82,29 @@ def main() -> int:
     parser.add_argument("--summary-name", required=True)
     parser.add_argument("--hard-timeout", type=int, default=180)
     args = parser.parse_args()
+    load_env_file(ROOT / ".env")
     cfg_raw = yaml.safe_load(args.config.read_text(encoding="utf-8")) if args.config.exists() else {}
+    generation = cfg_raw.get("generation", {}) if isinstance(cfg_raw.get("generation"), dict) else {}
+    recommended = cfg_raw.get("recommended_environment", {}) if isinstance(cfg_raw.get("recommended_environment"), dict) else {}
     cfg = {
-        "base_url": os.environ.get("LLM_BASE_URL") or cfg_value(cfg_raw, "base_url"),
-        "api_key": os.environ.get("LLM_API_KEY") or (os.environ.get(cfg_raw.get("api_key_env", "")) if cfg_raw.get("api_key_env") else None),
-        "model": os.environ.get("LLM_MODEL_NAME") or cfg_value(cfg_raw, "model_name"),
-        "temperature": float(os.environ.get("LLM_TEMPERATURE", cfg_raw.get("temperature", 0.1))),
-        "top_p": float(os.environ.get("LLM_TOP_P", cfg_raw.get("top_p", 0.8))),
-        "max_tokens": int(os.environ.get("LLM_MAX_TOKENS", cfg_raw.get("max_tokens", 2048))),
-        "request_timeout": float(os.environ.get("LLM_REQUEST_TIMEOUT", cfg_raw.get("request_timeout", 90))),
+        "base_url": (
+            os.environ.get("LLM_BASE_URL")
+            or env_from_config(cfg_raw, "provider", "base_url_env")
+            or cfg_value(cfg_raw, "base_url")
+            or recommended.get("huggingface_router_base_url")
+        ),
+        "api_key": api_key_from_env(cfg_raw),
+        "model": (
+            os.environ.get("LLM_MODEL_NAME")
+            or env_from_config(cfg_raw, "provider", "model_name_env")
+            or cfg_value(cfg_raw, "model_name")
+            or recommended.get("huggingface_router_model_name")
+            or recommended.get("fallback_model_name")
+        ),
+        "temperature": float(os.environ.get("LLM_TEMPERATURE", generation.get("temperature", cfg_raw.get("temperature", 0.1)))),
+        "top_p": float(os.environ.get("LLM_TOP_P", generation.get("top_p", cfg_raw.get("top_p", 0.8)))),
+        "max_tokens": int(os.environ.get("LLM_MAX_TOKENS", generation.get("max_tokens", cfg_raw.get("max_tokens", 2048)))),
+        "request_timeout": float(os.environ.get("LLM_REQUEST_TIMEOUT", generation.get("request_timeout_seconds", cfg_raw.get("request_timeout", 90)))),
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)
     summary_path = args.output_dir / args.summary_name
@@ -61,10 +112,10 @@ def main() -> int:
         summary_path.write_text(
             "# Qwen3.5-27B isolated run summary\n\n"
             "Status: not_started\n\n"
-            "- Missing LLM_BASE_URL / LLM_API_KEY / LLM_MODEL_NAME.\n",
+            "- Missing API key. Set `LLM_API_KEY` or `HF_TOKEN`.\n",
             encoding="utf-8",
         )
-        print("missing API config")
+        print("missing API key; set LLM_API_KEY or HF_TOKEN")
         return 2
 
     prompts = sorted(args.prompt_dir.glob("*.txt"))
