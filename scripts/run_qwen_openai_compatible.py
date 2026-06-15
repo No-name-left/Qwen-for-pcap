@@ -90,6 +90,45 @@ def parse_json_objects(text: str) -> list[dict[str, Any]]:
     raise ValueError("model output is JSON but not an object or object array")
 
 
+def extract_record_id_from_prompt(prompt_text: str, fallback: str) -> str:
+    marker = "CLASSIFICATION_RECORD:"
+    if marker not in prompt_text:
+        return fallback
+    payload = prompt_text.split(marker, 1)[1].strip()
+    try:
+        record, _ = json.JSONDecoder().raw_decode(payload)
+    except json.JSONDecodeError:
+        return fallback
+    if isinstance(record, dict):
+        return str(record.get("record_id") or record.get("session_id") or fallback)
+    return fallback
+
+
+def load_record_id_filter(value: str | None) -> set[str] | None:
+    if not value:
+        return None
+    path = Path(value)
+    if path.exists():
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            for key in ("record_ids", "failed_records", "records"):
+                if key in data:
+                    data = data[key]
+                    break
+        if not isinstance(data, list):
+            raise ValueError(f"--only-record-ids file must contain a list or known list field: {path}")
+        out: set[str] = set()
+        for item in data:
+            if isinstance(item, dict):
+                rid = item.get("record_id") or item.get("session_id")
+            else:
+                rid = item
+            if rid:
+                out.add(str(rid))
+        return out
+    return {item.strip() for item in value.split(",") if item.strip()}
+
+
 def code_set_for_name(name: str) -> set[str] | None:
     low = name.lower()
     if "technique" in low:
@@ -104,6 +143,25 @@ def error_code(error: str) -> str | None:
         if code in error:
             return code
     return None
+
+
+def classify_error(error: str, exc_type: str = "") -> str:
+    low = f"{exc_type} {error}".lower()
+    if "401" in low or "unauthorized" in low:
+        return "401 unauthorized"
+    if "402" in low or "quota" in low or "payment required" in low:
+        return "402 quota depleted"
+    if "429" in low or "rate limit" in low or "too many requests" in low:
+        return "429 rate limit"
+    if "timed out" in low or "timeout" in low:
+        return "timeout"
+    if "jsondecodeerror" in low or "model output is json but not" in low:
+        return "JSON parse failure"
+    if "empty" in low:
+        return "empty response"
+    if any(code in low for code in ("500", "502", "503", "504")):
+        return "provider error"
+    return "unknown"
 
 
 def safe_host(base_url: str) -> str:
@@ -124,6 +182,10 @@ def main() -> int:
     parser.add_argument("--max-tokens", type=int)
     parser.add_argument("--sleep-seconds", type=float, default=0.0)
     parser.add_argument("--require-run-api-flag", action="store_true")
+    parser.add_argument("--retry-failed-once", action="store_true")
+    parser.add_argument("--continue-on-error", action="store_true")
+    parser.add_argument("--failed-records-out", type=Path)
+    parser.add_argument("--only-record-ids")
     args = parser.parse_args()
     load_env_file(ROOT / ".env")
     cfg = load_config(args.config)
@@ -169,7 +231,16 @@ def main() -> int:
         )
         print("missing API key; set LLM_API_KEY or HF_TOKEN; no call made")
         return 2
-    prompts = sorted(args.prompt_dir.glob("*.txt"))
+    if args.retry_failed_once:
+        args.retries = max(args.retries, 1)
+    record_id_filter = load_record_id_filter(args.only_record_ids)
+    prompt_items = []
+    for prompt_path in sorted(args.prompt_dir.glob("*.txt")):
+        prompt_text = prompt_path.read_text(encoding="utf-8")
+        record_id = extract_record_id_from_prompt(prompt_text, prompt_path.stem)
+        if record_id_filter is None or record_id in record_id_filter:
+            prompt_items.append((prompt_path, record_id, prompt_text))
+    prompts = prompt_items
     if args.max_files is not None:
         prompts = prompts[: args.max_files]
     if not prompts:
@@ -189,7 +260,9 @@ def main() -> int:
     json_parse_failures = 0
     invalid_code_count = 0
     error_counts: dict[str, int] = {}
-    for idx, prompt_path in enumerate(prompts, start=1):
+    failed_records: list[dict[str, Any]] = []
+    stop_after_batch = False
+    for idx, (prompt_path, record_id, prompt_text) in enumerate(prompts, start=1):
         raw_path = raw_dir / f"raw_batch_{idx:03d}.txt"
         parsed_path = parsed_dir / f"parsed_batch_{idx:03d}.json"
         status = "failed"
@@ -201,7 +274,7 @@ def main() -> int:
             try:
                 response = client.chat.completions.create(
                     model=model,
-                    messages=[{"role": "user", "content": prompt_path.read_text(encoding="utf-8")}],
+                    messages=[{"role": "user", "content": prompt_text}],
                     temperature=temperature,
                     top_p=top_p,
                     max_tokens=max_tokens,
@@ -220,6 +293,7 @@ def main() -> int:
                 break
             except Exception as exc:
                 error = str(exc)
+                category = classify_error(error, type(exc).__name__)
                 raw_path.write_text(f"ERROR: {type(exc).__name__}: {error}\n", encoding="utf-8")
                 if attempt == args.retries:
                     if type(exc).__name__ in {"JSONDecodeError", "ValueError"}:
@@ -227,12 +301,23 @@ def main() -> int:
                     code = error_code(error)
                     if code:
                         error_counts[code] = error_counts.get(code, 0) + 1
+                    failed_records.append({
+                        "record_id": record_id,
+                        "prompt": str(prompt_path.resolve().relative_to(ROOT)),
+                        "batch": idx,
+                        "error_category": category,
+                        "error": error,
+                    })
+                    if category in {"401 unauthorized", "402 quota depleted"}:
+                        stop_after_batch = True
                 time.sleep(2 * (attempt + 1))
         rows.append({
             "batch": idx,
+            "record_id": record_id,
             "prompt": str(prompt_path.resolve().relative_to(ROOT)),
             "status": status,
             "error": error,
+            "error_category": classify_error(error) if error else "",
             "records": records,
             "invalid_codes": invalid_codes_for_batch,
         })
@@ -253,10 +338,13 @@ def main() -> int:
             "",
         ]
         for row in rows:
-            lines.append(f"- batch_{row['batch']:03d}: {row['status']}; prompt=`{row['prompt']}`; records={row['records']}; invalid_codes={row['invalid_codes']}")
+            lines.append(f"- batch_{row['batch']:03d}: {row['status']}; record_id=`{row['record_id']}`; prompt=`{row['prompt']}`; records={row['records']}; invalid_codes={row['invalid_codes']}")
             if row["error"] and row["status"] != "success":
+                lines.append(f"  error_category: {row['error_category']}")
                 lines.append(f"  error: {row['error']}")
         summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        if stop_after_batch or (status != "success" and not args.continue_on_error):
+            break
         if args.sleep_seconds > 0 and idx < len(prompts):
             time.sleep(args.sleep_seconds)
     result_path = args.output_dir / args.result_name
@@ -271,8 +359,13 @@ def main() -> int:
         "invalid_code_count": invalid_code_count,
         "error_counts": error_counts,
         "records": len(all_results),
+        "rows": rows,
+        "failed_records": failed_records,
     }
     (args.output_dir / "run_stats.json").write_text(json.dumps(stats, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if args.failed_records_out:
+        args.failed_records_out.parent.mkdir(parents=True, exist_ok=True)
+        args.failed_records_out.write_text(json.dumps(failed_records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     lines = [
         "# Qwen3.5-27B run summary",
         "",
@@ -287,8 +380,9 @@ def main() -> int:
         "",
     ]
     for row in rows:
-        lines.append(f"- batch_{row['batch']:03d}: {row['status']}; prompt=`{row['prompt']}`; records={row['records']}; invalid_codes={row['invalid_codes']}")
+        lines.append(f"- batch_{row['batch']:03d}: {row['status']}; record_id=`{row['record_id']}`; prompt=`{row['prompt']}`; records={row['records']}; invalid_codes={row['invalid_codes']}")
         if row["error"] and row["status"] != "success":
+            lines.append(f"  error_category: {row['error_category']}")
             lines.append(f"  error: {row['error']}")
     summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"wrote {len(all_results)} parsed records")
