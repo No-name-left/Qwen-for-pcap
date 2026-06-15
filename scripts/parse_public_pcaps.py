@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -31,8 +32,9 @@ TSHARK_FIELDS = [
 ]
 
 
-def command_exists(name: str) -> bool:
-    return subprocess.run(["bash", "-lc", f"command -v {name} >/dev/null 2>&1"]).returncode == 0
+def command_exists(name: str, env: dict | None = None) -> bool:
+    path = env.get("PATH") if env else None
+    return shutil.which(name, path=path) is not None
 
 
 def run(cmd: list[str], cwd: Path | None = None, env: dict | None = None, stdout_path: Path | None = None) -> tuple[int | None, str, str]:
@@ -100,6 +102,7 @@ def discover_pcaps(input_dir: Path, dataset_id: str | None) -> list[tuple[str, P
 
 
 def parse_case(case_id: str, pcap: Path, output_dir: Path, rules: Path | None) -> dict:
+    pcap_abs = pcap.resolve()
     case_dir = output_dir / case_id
     tshark_dir = case_dir / "tshark"
     zeek_dir = case_dir / "zeek"
@@ -114,7 +117,7 @@ def parse_case(case_id: str, pcap: Path, output_dir: Path, rules: Path | None) -
         tshark_cmd = [
             "tshark",
             "-r",
-            str(pcap),
+            str(pcap_abs),
             "-T",
             "fields",
             "-E",
@@ -137,8 +140,8 @@ def parse_case(case_id: str, pcap: Path, output_dir: Path, rules: Path | None) -
     zeek_rc = None
     env = os.environ.copy()
     env["PATH"] = f"/opt/zeek/bin:{env.get('PATH', '')}"
-    if command_exists("zeek"):
-        zeek_rc, zeek_out, zeek_err = run(["zeek", "-C", "-r", str(pcap)], cwd=zeek_dir, env=env)
+    if command_exists("zeek", env):
+        zeek_rc, zeek_out, zeek_err = run(["zeek", "-C", "-r", str(pcap_abs)], cwd=zeek_dir, env=env)
         (zeek_dir / "zeek_run.stdout").write_text(zeek_out, encoding="utf-8")
         (zeek_dir / "zeek_run.stderr").write_text(zeek_err, encoding="utf-8")
         if zeek_rc != 0:
@@ -149,7 +152,7 @@ def parse_case(case_id: str, pcap: Path, output_dir: Path, rules: Path | None) -
 
     suricata_rc = None
     if command_exists("suricata"):
-        suricata_cmd = ["suricata", "--runmode", "single", "-r", str(pcap), "-l", str(suricata_dir), "-k", "none"]
+        suricata_cmd = ["suricata", "--runmode", "single", "-r", str(pcap_abs), "-l", str(suricata_dir), "-k", "none"]
         if rules and rules.exists():
             suricata_cmd.extend(["-S", str(rules)])
         suricata_rc, suricata_out, suricata_err = run(suricata_cmd)

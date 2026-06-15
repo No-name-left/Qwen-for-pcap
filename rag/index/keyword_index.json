@@ -1,5 +1,5 @@
 {
-  "chunk_count": 83,
+  "chunk_count": 84,
   "chunk_meta": {
     "attack_chain_summary__chunk_001": {
       "attack_stage": [
@@ -246,6 +246,30 @@
       ],
       "source_file": "rag/knowledge/competition_labels/bruteforce_boundary.md",
       "title": "Password brute force boundary"
+    },
+    "competition_conservative_normal_vs_callback_boundary__chunk_001": {
+      "attack_stage": [
+        "none",
+        "command_and_control"
+      ],
+      "attack_type": [
+        "normal",
+        "trojan_callback",
+        "c2"
+      ],
+      "category": "competition_labels",
+      "doc_id": "competition_conservative_normal_vs_callback_boundary",
+      "keywords": [
+        "TN01_01",
+        "TA11_02",
+        "normal boundary",
+        "callback boundary",
+        "high fanout",
+        "failed rate",
+        "flow-only limitation"
+      ],
+      "source_file": "rag/knowledge/competition_labels/conservative_normal_vs_callback_boundary.md",
+      "title": "Conservative normal versus callback boundary"
     },
     "competition_normal_business_traffic_boundary__chunk_001": {
       "attack_stage": [
@@ -1969,6 +1993,7 @@
       "attack_type_mapping__chunk_001": 2,
       "backdoor_detection__chunk_001": 3,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 5,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 3,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 3,
       "competition_technique_codes__chunk_001": 2,
@@ -2115,6 +2140,7 @@
     "alert": {
       "c2_detection__chunk_001": 1,
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
       "data_exfiltration_detection__chunk_001": 1,
@@ -2286,6 +2312,7 @@
       "competition_anonymized_ip_domain_policy__chunk_001": 4,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 3,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 2,
       "competition_phase_codes__chunk_001": 6,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 2,
@@ -2417,6 +2444,7 @@
       "case_level_vs_event_level_labels__chunk_001": 1,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 1,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "competition_session_and_scan_group_policy__chunk_001": 1,
       "competition_technique_codes__chunk_001": 1,
@@ -2449,6 +2477,7 @@
       "c2_detection__chunk_001": 2,
       "case_level_vs_event_level_labels__chunk_001": 1,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 2,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 2,
       "competition_phase_codes__chunk_001": 2,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "competition_session_and_scan_group_policy__chunk_001": 1,
@@ -2506,6 +2535,9 @@
     "assume": {
       "attack_chain_summary__chunk_001": 1
     },
+    "asymmetric": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
+    },
     "at": {
       "initial_access_stage__chunk_001": 1
     },
@@ -2517,6 +2549,7 @@
     "attack": {
       "attack_chain_summary__chunk_001": 4,
       "attack_type_mapping__chunk_001": 3,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 2,
       "competition_technique_codes__chunk_001": 1,
       "dos_ddos_detection__chunk_001": 1,
@@ -2690,6 +2723,9 @@
       "protocol_smb__chunk_001": 1,
       "zeek_dns_log_fields__chunk_001": 1
     },
+    "avoiding": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
+    },
     "avoids": {
       "competition_session_and_scan_group_policy__chunk_001": 1
     },
@@ -2704,6 +2740,7 @@
       "command_and_control_stage__chunk_001": 2,
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 7,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 4,
       "competition_session_and_scan_group_policy__chunk_001": 1,
       "competition_technique_codes__chunk_001": 3,
@@ -2762,6 +2799,7 @@
       "backdoor_detection__chunk_001": 1,
       "case_level_vs_event_level_labels__chunk_001": 3,
       "competition_anonymized_ip_domain_policy__chunk_001": 2,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 2,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 4,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
@@ -2826,6 +2864,7 @@
     "because": {
       "bruteforce_detection__chunk_001": 1,
       "c2_detection__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "dos_ddos_detection__chunk_001": 1,
       "exploit_detection__chunk_001": 1,
@@ -2905,6 +2944,7 @@
     },
     "benign": {
       "attack_type_mapping__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "normal_periodic_connection_vs_c2__chunk_001": 1,
       "protocol_anomaly_low_confidence__chunk_001": 1,
@@ -3019,6 +3059,7 @@
     "boundary": {
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 2,
       "competition_bruteforce_boundary__chunk_001": 2,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 4,
       "competition_normal_business_traffic_boundary__chunk_001": 2
     },
     "breadth": {
@@ -3043,6 +3084,7 @@
     "brute": {
       "bruteforce_detection__chunk_001": 1,
       "competition_bruteforce_boundary__chunk_001": 3,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "competition_technique_codes__chunk_001": 1,
       "protocol_ssh_ftp_rdp__chunk_001": 1
@@ -3075,6 +3117,7 @@
     },
     "business": {
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 4,
       "competition_phase_codes__chunk_001": 1,
       "competition_technique_codes__chunk_001": 1
@@ -3085,6 +3128,7 @@
     "but": {
       "attack_chain_summary__chunk_001": 1,
       "case_level_vs_event_level_labels__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "confidence_policy__chunk_001": 1,
       "signature_generic_exploit_alerts__chunk_001": 1,
       "signature_irc_botnet__chunk_001": 1,
@@ -3118,6 +3162,7 @@
       "zeek_conn_log_fields__chunk_001": 1
     },
     "bytes": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1
     },
     "c2": {
@@ -3128,6 +3173,7 @@
       "command_and_control_stage__chunk_001": 3,
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 3,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 2,
       "competition_session_and_scan_group_policy__chunk_001": 1,
@@ -3173,6 +3219,9 @@
     "c2-like": {
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 1
     },
+    "c2/callback": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
+    },
     "c2/checkin": {
       "signature_strrat__chunk_002": 1
     },
@@ -3195,6 +3244,7 @@
       "backdoor_detection__chunk_001": 1,
       "command_and_control_stage__chunk_001": 2,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 5,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 4,
       "competition_phase_codes__chunk_001": 1,
       "competition_technique_codes__chunk_001": 1,
       "confidence_policy__chunk_001": 1,
@@ -3216,8 +3266,12 @@
       "zeek_http_log_fields__chunk_001": 2,
       "zeek_ssl_tls_log_fields__chunk_001": 1
     },
+    "callback-like": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
+    },
     "callbacks": {
       "command_and_control_stage__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1,
       "trojan_callback_detection__chunk_001": 1
     },
@@ -3234,6 +3288,7 @@
       "c2_detection__chunk_001": 1,
       "case_level_vs_event_level_labels__chunk_001": 2,
       "command_and_control_stage__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "competition_session_and_scan_group_policy__chunk_001": 2,
       "data_exfiltration_detection__chunk_001": 1,
@@ -3447,6 +3502,9 @@
     "choosing": {
       "port_scan_detection__chunk_001": 1
     },
+    "cic/cse": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
+    },
     "cite": {
       "attack_chain_summary__chunk_001": 1,
       "event_card_schema_interpretation__chunk_001": 1,
@@ -3648,6 +3706,7 @@
       "command_and_control_stage__chunk_001": 4,
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "competition_session_and_scan_group_policy__chunk_001": 1,
@@ -3719,6 +3778,7 @@
       "signature_et_scan__chunk_001": 1
     },
     "communication": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "signature_dns_tunnel__chunk_001": 1,
       "signature_doublepulsar__chunk_001": 1
     },
@@ -3738,10 +3798,14 @@
     "competition_bruteforce_boundary": {
       "competition_bruteforce_boundary__chunk_001": 1
     },
+    "competition_conservative_normal_vs_callback_boundary": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
+    },
     "competition_labels": {
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 1,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
@@ -3777,6 +3841,9 @@
     },
     "compromised": {
       "trojan_callback_detection__chunk_001": 1
+    },
+    "compromised-host": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
     },
     "conclusive": {
       "zeek_http_log_fields__chunk_001": 1
@@ -3850,6 +3917,7 @@
     "connection": {
       "backdoor_detection__chunk_001": 1,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "dos_ddos_detection__chunk_001": 1,
       "false_positive_low_signal_events__chunk_001": 1,
@@ -3870,11 +3938,15 @@
     "connections": {
       "bruteforce_detection__chunk_001": 1,
       "c2_detection__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "normal_periodic_connection_vs_c2__chunk_001": 1,
       "protocol_dns__chunk_001": 1,
       "signature_reverse_shell__chunk_001": 1,
       "zeek_conn_log_fields__chunk_001": 1
+    },
+    "conservative": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 3
     },
     "considered": {
       "signature_doublepulsar__chunk_002": 1,
@@ -3926,6 +3998,7 @@
     },
     "context": {
       "c2_detection__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 2,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "confidence_policy__chunk_001": 1,
@@ -4258,6 +4331,7 @@
     },
     "dns": {
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "data_exfiltration_detection__chunk_001": 2,
       "normal_dns_vs_dns_tunnel__chunk_001": 8,
       "output_schema_policy__chunk_001": 1,
@@ -4277,6 +4351,9 @@
     "dns/http/tls": {
       "command_and_control_stage__chunk_001": 1,
       "false_positive_low_signal_events__chunk_001": 1
+    },
+    "dns/nbns": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
     },
     "dns_queries": {
       "event_card_schema_interpretation__chunk_001": 1,
@@ -4332,6 +4409,7 @@
     "does": {
       "attack_type_mapping__chunk_001": 1,
       "case_level_vs_event_level_labels__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "dos_ddos_detection__chunk_001": 1,
       "false_positive_low_signal_events__chunk_001": 1,
       "none_stage__chunk_001": 1,
@@ -4566,6 +4644,7 @@
     },
     "evaluation": {
       "case_level_vs_event_level_labels__chunk_001": 2,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1
     },
     "eve": {
@@ -4644,6 +4723,7 @@
     },
     "every": {
       "case_level_vs_event_level_labels__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1,
       "stage_mapping_overview__chunk_001": 1
     },
@@ -4657,6 +4737,7 @@
       "command_and_control_stage__chunk_001": 3,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 1,
       "competition_bruteforce_boundary__chunk_001": 2,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 2,
       "competition_normal_business_traffic_boundary__chunk_001": 2,
       "competition_phase_codes__chunk_001": 2,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
@@ -4796,6 +4877,7 @@
       "attack_type_mapping__chunk_001": 4,
       "case_level_vs_event_level_labels__chunk_001": 3,
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 2,
       "competition_session_and_scan_group_policy__chunk_001": 1,
@@ -4888,6 +4970,7 @@
     "external": {
       "c2_detection__chunk_001": 1,
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
       "trojan_callback_detection__chunk_001": 1
     },
@@ -4909,6 +4992,7 @@
     "failed": {
       "bruteforce_detection__chunk_001": 1,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 2,
       "port_scan_detection__chunk_001": 1,
       "protocol_tcp_flags__chunk_001": 2,
@@ -4917,6 +5001,7 @@
       "zeek_dns_log_fields__chunk_001": 1
     },
     "failed-connection": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "reconnaissance_stage__chunk_001": 1,
       "zeek_conn_log_fields__chunk_001": 1
     },
@@ -4970,10 +5055,12 @@
       "signature_generic_malware_callback__chunk_001": 1
     },
     "fanout": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1
     },
     "features": {
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "port_scan_detection__chunk_001": 1,
       "reconnaissance_stage__chunk_001": 1,
@@ -4989,6 +5076,7 @@
     },
     "fields": {
       "case_level_vs_event_level_labels__chunk_001": 2,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "event_card_schema_interpretation__chunk_001": 2,
       "event_level_vs_pcap_level__chunk_001": 3,
@@ -5075,10 +5163,14 @@
       "dos_ddos_detection__chunk_001": 1
     },
     "flow": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1,
       "signature_strrat__chunk_001": 1,
       "suricata_eve_alerts__chunk_001": 2
+    },
+    "flow-only": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 3
     },
     "focus": {
       "signature_dos_ddos__chunk_001": 1
@@ -5127,6 +5219,7 @@
     "force": {
       "bruteforce_detection__chunk_001": 1,
       "competition_bruteforce_boundary__chunk_001": 3,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "competition_technique_codes__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1,
@@ -5154,6 +5247,7 @@
       "case_level_vs_event_level_labels__chunk_001": 1,
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 2,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
       "confidence_policy__chunk_001": 2,
       "event_card_schema_interpretation__chunk_001": 2,
@@ -5219,6 +5313,7 @@
       "weak_evidence_handling__chunk_001": 1
     },
     "generic": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
       "protocol_anomaly_low_confidence__chunk_001": 1,
       "protocol_icmp_icmpv6__chunk_001": 1,
@@ -5297,6 +5392,7 @@
     },
     "has": {
       "bruteforce_detection__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "dos_ddos_detection__chunk_001": 1
     },
@@ -5346,6 +5442,7 @@
       "weak_evidence_handling__chunk_001": 1
     },
     "hidden": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
       "weak_evidence_handling__chunk_001": 1
     },
@@ -5357,6 +5454,7 @@
     },
     "high": {
       "c2_detection__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 2,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "confidence_policy__chunk_001": 1,
@@ -5488,6 +5586,9 @@
       "zeek_dns_log_fields__chunk_001": 1,
       "zeek_weird_notice_logs__chunk_001": 1
     },
+    "identity": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
+    },
     "ids": {
       "bruteforce_detection__chunk_001": 1,
       "command_and_control_stage__chunk_001": 1,
@@ -5534,6 +5635,7 @@
       "attack_type_mapping__chunk_001": 1,
       "backdoor_detection__chunk_001": 4,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 4,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "competition_technique_codes__chunk_001": 1,
       "persistence_stage__chunk_001": 2,
@@ -5808,6 +5910,7 @@
     },
     "insufficient": {
       "attack_type_mapping__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "none_stage__chunk_001": 2,
       "other_attack_policy__chunk_001": 1
     },
@@ -5913,6 +6016,9 @@
     "irc-like": {
       "signature_irc_botnet__chunk_001": 1
     },
+    "irc/http": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
+    },
     "irregularities": {
       "zeek_weird_notice_logs__chunk_001": 1
     },
@@ -5923,6 +6029,7 @@
       "c2_detection__chunk_001": 1,
       "case_level_vs_event_level_labels__chunk_001": 1,
       "command_and_control_stage__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 2,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 6,
       "competition_session_and_scan_group_policy__chunk_001": 2,
@@ -5977,6 +6084,7 @@
     },
     "isolated": {
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "confidence_policy__chunk_001": 1,
       "protocol_anomaly_low_confidence__chunk_001": 2,
@@ -5985,6 +6093,7 @@
     "it": {
       "backdoor_detection__chunk_001": 2,
       "bruteforce_detection__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "confidence_policy__chunk_001": 1,
       "data_exfiltration_detection__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1,
@@ -6165,6 +6274,7 @@
     },
     "labels": {
       "case_level_vs_event_level_labels__chunk_001": 6,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 2,
       "competition_phase_codes__chunk_001": 2,
       "competition_technique_codes__chunk_001": 2,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
@@ -6215,6 +6325,9 @@
     },
     "likely": {
       "protocol_common_ports__chunk_001": 1
+    },
+    "limitation": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
     },
     "limits": {
       "protocol_anomaly_low_confidence__chunk_001": 1
@@ -6309,6 +6422,9 @@
       "protocol_anomaly_low_confidence__chunk_001": 2,
       "suricata_eve_alerts__chunk_001": 1,
       "zeek_weird_notice_logs__chunk_001": 1
+    },
+    "low-detail": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
     },
     "low-level": {
       "protocol_tcp_flags__chunk_001": 1
@@ -6432,6 +6548,7 @@
       "bruteforce_detection__chunk_001": 2,
       "competition_anonymized_ip_domain_policy__chunk_001": 3,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 2,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
       "dos_ddos_detection__chunk_001": 1,
@@ -6610,6 +6727,7 @@
       "case_level_vs_event_level_labels__chunk_001": 1,
       "command_and_control_stage__chunk_001": 1,
       "competition_anonymized_ip_domain_policy__chunk_001": 2,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "data_exfiltration_detection__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1,
@@ -6644,6 +6762,7 @@
     },
     "mean": {
       "case_level_vs_event_level_labels__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "tshark_packet_fields__chunk_001": 1
     },
     "meaning": {
@@ -6655,6 +6774,7 @@
       "signature_generic_exploit_alerts__chunk_001": 1
     },
     "means": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "none_stage__chunk_001": 1
     },
     "mechanism": {
@@ -6843,6 +6963,9 @@
     "narrower": {
       "backdoor_detection__chunk_001": 1
     },
+    "nbns": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
+    },
     "nc": {
       "signature_reverse_shell__chunk_001": 1
     },
@@ -6915,6 +7038,7 @@
       "attack_type_mapping__chunk_001": 2,
       "case_level_vs_event_level_labels__chunk_001": 1,
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "competition_session_and_scan_group_policy__chunk_001": 1,
@@ -6966,6 +7090,7 @@
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 1,
       "competition_bruteforce_boundary__chunk_001": 2,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 6,
       "competition_normal_business_traffic_boundary__chunk_001": 8,
       "competition_phase_codes__chunk_001": 3,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
@@ -7048,6 +7173,7 @@
       "competition_anonymized_ip_domain_policy__chunk_001": 2,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 2,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 2,
       "competition_normal_business_traffic_boundary__chunk_001": 3,
       "competition_phase_codes__chunk_001": 2,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
@@ -7222,6 +7348,7 @@
       "backdoor_detection__chunk_001": 1,
       "case_level_vs_event_level_labels__chunk_001": 1,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "competition_technique_codes__chunk_001": 2,
@@ -7267,6 +7394,7 @@
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 6,
       "competition_bruteforce_boundary__chunk_001": 4,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 4,
       "competition_normal_business_traffic_boundary__chunk_001": 3,
       "competition_phase_codes__chunk_001": 6,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 3,
@@ -7342,6 +7470,7 @@
       "attack_chain_summary__chunk_001": 1
     },
     "ordinary": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "none_stage__chunk_001": 1,
       "normal_periodic_connection_vs_c2__chunk_001": 1,
       "normal_smb_vs_smb_exploit__chunk_001": 1,
@@ -7421,6 +7550,7 @@
     "outbound": {
       "command_and_control_stage__chunk_001": 1,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 2,
       "data_exfiltration_detection__chunk_001": 3,
       "signature_generic_malware_callback__chunk_001": 1,
       "signature_reverse_shell__chunk_001": 2,
@@ -7485,6 +7615,7 @@
       "tshark_packet_fields__chunk_001": 2
     },
     "packet-level": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "tshark_packet_fields__chunk_001": 1,
       "zeek_conn_log_fields__chunk_001": 1
     },
@@ -7566,6 +7697,7 @@
     },
     "patterns": {
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "data_exfiltration_detection__chunk_001": 1,
       "exploit_detection__chunk_001": 1,
       "protocol_tcp_flags__chunk_001": 1,
@@ -7578,6 +7710,7 @@
     },
     "payload": {
       "c2_detection__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 4,
       "exploit_detection__chunk_001": 2,
@@ -7595,6 +7728,7 @@
     "pcap": {
       "competition_anonymized_ip_domain_policy__chunk_001": 4,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 2,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 2,
       "competition_session_and_scan_group_policy__chunk_001": 1,
@@ -7714,6 +7848,7 @@
       "attack_chain_summary__chunk_001": 2,
       "attack_type_mapping__chunk_001": 2,
       "competition_anonymized_ip_domain_policy__chunk_001": 2,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_session_and_scan_group_policy__chunk_001": 2,
       "confidence_policy__chunk_001": 2,
       "event_level_vs_pcap_level__chunk_001": 1,
@@ -7863,6 +7998,9 @@
     "pressure": {
       "normal_high_volume_traffic__chunk_001": 1
     },
+    "primary": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
+    },
     "priority": {
       "suricata_signature_category_severity__chunk_001": 1
     },
@@ -7904,6 +8042,9 @@
     },
     "prompt": {
       "competition_session_and_scan_group_policy__chunk_001": 1
+    },
+    "prompts": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
     },
     "proof": {
       "c2_detection__chunk_001": 1
@@ -7988,6 +8129,7 @@
       "zeek_files_log_fields__chunk_001": 1
     },
     "prove": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "persistence_stage__chunk_001": 1,
       "protocol_tls_sni__chunk_001": 1,
       "zeek_ssl_tls_log_fields__chunk_001": 1
@@ -8053,6 +8195,7 @@
       "signature_strrat__chunk_002": 2
     },
     "rate": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "normal_dns_vs_dns_tunnel__chunk_001": 1,
       "normal_high_volume_traffic__chunk_001": 1,
       "signature_dns_tunnel__chunk_001": 1,
@@ -8127,6 +8270,7 @@
     "record": {
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 3,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 4,
       "competition_phase_codes__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 3,
       "competition_session_and_scan_group_policy__chunk_001": 3
@@ -8230,6 +8374,7 @@
       "command_and_control_stage__chunk_001": 1,
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
       "competition_bruteforce_boundary__chunk_001": 2,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "dos_ddos_detection__chunk_001": 1,
       "normal_dns_vs_dns_tunnel__chunk_001": 1,
       "normal_http_vs_web_exploit__chunk_001": 1,
@@ -8383,7 +8528,11 @@
     "rough": {
       "case_level_vs_event_level_labels__chunk_001": 3
     },
+    "row": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
+    },
     "rows": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_session_and_scan_group_policy__chunk_001": 1
     },
     "rst": {
@@ -8414,6 +8563,7 @@
     },
     "same": {
       "competition_anonymized_ip_domain_policy__chunk_001": 3,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 2,
       "competition_session_and_scan_group_policy__chunk_001": 1,
@@ -8524,6 +8674,9 @@
     "scripts": {
       "zeek_weird_notice_logs__chunk_001": 1
     },
+    "secondary": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
+    },
     "security": {
       "signature_doublepulsar__chunk_002": 1,
       "tshark_packet_fields__chunk_001": 1
@@ -8584,6 +8737,7 @@
     "service": {
       "backdoor_detection__chunk_001": 1,
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "dos_ddos_detection__chunk_001": 2,
       "exploit_detection__chunk_001": 1,
@@ -8600,6 +8754,7 @@
       "zeek_conn_log_fields__chunk_001": 2
     },
     "services": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "normal_high_volume_traffic__chunk_001": 1,
       "port_scan_detection__chunk_001": 1,
       "protocol_common_ports__chunk_001": 1,
@@ -8694,6 +8849,7 @@
       "signature_reverse_shell__chunk_001": 1
     },
     "short": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "protocol_tcp_flags__chunk_001": 1
     },
@@ -8702,6 +8858,7 @@
       "attack_type_mapping__chunk_001": 2,
       "case_level_vs_event_level_labels__chunk_001": 2,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "competition_session_and_scan_group_policy__chunk_001": 2,
       "confidence_policy__chunk_001": 2,
@@ -8734,6 +8891,7 @@
     "shows": {
       "backdoor_detection__chunk_001": 1,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 2,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
       "event_card_schema_interpretation__chunk_001": 1,
@@ -8858,6 +9016,7 @@
       "command_and_control_stage__chunk_001": 1,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 1,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
       "confidence_policy__chunk_001": 1,
@@ -9015,6 +9174,7 @@
       "command_and_control_stage__chunk_001": 1,
       "competition_anonymized_ip_domain_policy__chunk_001": 2,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1,
       "initial_access_stage__chunk_001": 1,
@@ -9028,6 +9188,9 @@
       "tshark_packet_fields__chunk_001": 1,
       "zeek_conn_log_fields__chunk_001": 1,
       "zeek_files_log_fields__chunk_001": 1
+    },
+    "source/destination": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
     },
     "source_presence": {
       "event_card_schema_interpretation__chunk_001": 3,
@@ -9316,6 +9479,7 @@
       "c2_detection__chunk_001": 1,
       "case_level_vs_event_level_labels__chunk_001": 1,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 2,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "event_card_schema_interpretation__chunk_001": 1,
@@ -9363,6 +9527,7 @@
     },
     "support": {
       "command_and_control_stage__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "dos_ddos_detection__chunk_001": 1,
       "false_positive_low_signal_events__chunk_001": 1,
       "none_stage__chunk_001": 1,
@@ -9414,6 +9579,7 @@
       "c2_detection__chunk_001": 1,
       "command_and_control_stage__chunk_001": 1,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
       "event_card_schema_interpretation__chunk_001": 1,
@@ -9587,6 +9753,7 @@
     },
     "ta11_02": {
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 3,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 2,
       "competition_technique_codes__chunk_001": 2
     },
     "ta43": {
@@ -9720,6 +9887,7 @@
       "competition_anonymized_ip_domain_policy__chunk_001": 3,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 3,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 4,
       "competition_normal_business_traffic_boundary__chunk_001": 2,
       "competition_phase_codes__chunk_001": 3,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 4,
@@ -9797,6 +9965,7 @@
       "zeek_weird_notice_logs__chunk_001": 1
     },
     "they": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "exploit_detection__chunk_001": 1,
       "signature_dns_tunnel__chunk_001": 1,
       "signature_et_scan__chunk_001": 2,
@@ -9841,6 +10010,7 @@
     },
     "timing": {
       "c2_detection__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "protocol_tls_sni__chunk_001": 1
     },
     "tls": {
@@ -9875,6 +10045,7 @@
     },
     "tn01_01": {
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 2,
       "competition_normal_business_traffic_boundary__chunk_001": 2,
       "competition_technique_codes__chunk_001": 3
     },
@@ -9886,6 +10057,7 @@
       "case_level_vs_event_level_labels__chunk_001": 1,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 1,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1,
       "event_to_pcap_aggregation__chunk_001": 4,
       "exploit_detection__chunk_001": 2,
@@ -10030,6 +10202,7 @@
       "zeek_weird_notice_logs__chunk_001": 1
     },
     "treated": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "normal_smb_vs_smb_exploit__chunk_001": 1,
       "signature_strrat__chunk_002": 1
     },
@@ -10056,6 +10229,7 @@
       "command_and_control_stage__chunk_001": 2,
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "competition_session_and_scan_group_policy__chunk_001": 1,
       "competition_technique_codes__chunk_001": 1,
@@ -10176,6 +10350,9 @@
       "signature_webshell__chunk_001": 2,
       "smb_exploit_detection__chunk_001": 1
     },
+    "unavailable": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
+    },
     "uncertain": {
       "attack_type_mapping__chunk_001": 1,
       "other_attack_policy__chunk_001": 1
@@ -10291,6 +10468,7 @@
       "command_and_control_stage__chunk_001": 1,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 4,
       "competition_bruteforce_boundary__chunk_001": 2,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 2,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 3,
@@ -10409,6 +10587,7 @@
     },
     "versus": {
       "case_level_vs_event_level_labels__chunk_001": 2,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 2,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 2,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 2,
       "event_level_vs_pcap_level__chunk_001": 2,
@@ -10515,6 +10694,7 @@
     },
     "web": {
       "bruteforce_detection__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
       "exploit_detection__chunk_001": 1,
       "initial_access_stage__chunk_001": 4,
@@ -10568,6 +10748,7 @@
       "command_and_control_stage__chunk_001": 2,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 3,
       "competition_bruteforce_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 4,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 3,
       "competition_session_and_scan_group_policy__chunk_001": 1,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 2,
@@ -10649,6 +10830,7 @@
       "attack_type_mapping__chunk_001": 1,
       "bruteforce_detection__chunk_001": 1,
       "c2_detection__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
       "confidence_policy__chunk_001": 1,
@@ -10694,6 +10876,7 @@
     },
     "without": {
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 1,
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 2,
       "confidence_policy__chunk_001": 1,
@@ -10725,6 +10908,7 @@
       "reconnaissance_stage__chunk_001": 1
     },
     "zeek": {
+      "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "event_card_schema_interpretation__chunk_001": 1,
       "port_scan_detection__chunk_001": 1,
       "reconnaissance_stage__chunk_001": 1,
@@ -10779,6 +10963,6 @@
       "weak_evidence_handling__chunk_001": 1
     }
   },
-  "token_count": 1408,
+  "token_count": 1429,
   "version": 1
 }

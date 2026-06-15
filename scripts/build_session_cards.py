@@ -162,6 +162,14 @@ def packets_path(case_dir: Path) -> Path | None:
     return None
 
 
+def display_path(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def key_for_conn(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
     return (
         str(row.get("id.orig_h") or row.get("src_ip") or row.get("src") or ""),
@@ -308,6 +316,7 @@ def build_cards_from_packets(
             "record_type": "session",
             "session_id": f"{pcap_id}::session::{idx:06d}",
             "pcap_id": pcap_id,
+            "parser_source": "tshark_fallback",
             "start_time": start,
             "end_time": end,
             "src_ip": src_ip or None,
@@ -326,6 +335,7 @@ def build_cards_from_packets(
             "zeek_uid": None,
             "tcp_stream": tcp_stream[0] if tcp_stream else None,
             "related_suricata_alerts": make_alert_summary(alert_index.get(key, [])),
+            "suricata_evidence_available": bool(alert_index),
             "http_summary": make_http_summary(rows) if any(row.get("http.host") or row.get("http.request.uri") for row in rows) else None,
             "dns_summary": make_dns_summary([{"query": row.get("dns.qry.name")} for row in rows if row.get("dns.qry.name")]),
             "tls_summary": make_tls_summary([{"server_name": row.get("tls.handshake.extensions_server_name")} for row in rows if row.get("tls.handshake.extensions_server_name")]),
@@ -362,6 +372,7 @@ def build_cards_for_pcap(case_dir: Path, pcap_id: str) -> list[dict[str, Any]]:
             "record_type": "session",
             "session_id": f"{pcap_id}::session::{idx:06d}",
             "pcap_id": pcap_id,
+            "parser_source": "zeek_conn",
             "start_time": ts,
             "end_time": end_ts,
             "src_ip": src_ip or None,
@@ -380,6 +391,7 @@ def build_cards_for_pcap(case_dir: Path, pcap_id: str) -> list[dict[str, Any]]:
             "zeek_uid": uid,
             "tcp_stream": tcp_stream[0] if tcp_stream else None,
             "related_suricata_alerts": related_alerts,
+            "suricata_evidence_available": bool(alert_rows),
             "http_summary": make_http_summary(http_by_uid.get(str(uid), [])) if uid else None,
             "dns_summary": make_dns_summary(dns_by_uid.get(str(uid), [])) if uid else None,
             "tls_summary": make_tls_summary(tls_by_uid.get(str(uid), [])) if uid else None,
@@ -402,26 +414,40 @@ def add_context_features(cards: list[dict[str, Any]]) -> None:
             by_dst[str(card.get("dst_ip"))].append(card)
             by_src_dst_port[(str(card.get("src_ip")), str(card.get("dst_ip")), card.get("dst_port"))].append(card)
 
+        src_stats = {}
+        for src, src_cards in by_src.items():
+            failed_count = sum(1 for c in src_cards if c.get("conn_state") in FAILED_STATES)
+            src_stats[src] = {
+                "conn_count": len(src_cards),
+                "unique_dst_ports": len({c.get("dst_port") for c in src_cards if c.get("dst_port") not in (None, "")}),
+                "unique_dst_ips": len({c.get("dst_ip") for c in src_cards if c.get("dst_ip") not in (None, "")}),
+                "failed_rate": round(failed_count / len(src_cards), 4) if src_cards else 0.0,
+            }
+        dst_unique_src_count = {
+            dst: len({c.get("src_ip") for c in dst_cards if c.get("src_ip") not in (None, "")})
+            for dst, dst_cards in by_dst.items()
+        }
+        src_dst_port_count = {key: len(value) for key, value in by_src_dst_port.items()}
+
         alert_times = [
             card.get("start_time")
             for card in pcap_cards
             if card.get("related_suricata_alerts") and isinstance(card.get("start_time"), (int, float))
         ]
         for card in pcap_cards:
-            src_cards = by_src[str(card.get("src_ip"))]
-            dst_cards = by_dst[str(card.get("dst_ip"))]
-            failed = [c for c in src_cards if c.get("conn_state") in FAILED_STATES]
-            same_src_same_dst_port = by_src_dst_port[(str(card.get("src_ip")), str(card.get("dst_ip")), card.get("dst_port"))]
+            src = str(card.get("src_ip"))
+            dst = str(card.get("dst_ip"))
+            stats = src_stats.get(src, {})
             start = card.get("start_time")
             neighbor_alert_count = 0
             if isinstance(start, (int, float)):
                 neighbor_alert_count = sum(1 for t in alert_times if isinstance(t, (int, float)) and abs(t - start) <= 60)
-            card["same_src_conn_count"] = len(src_cards)
-            card["same_src_unique_dst_ports"] = len({c.get("dst_port") for c in src_cards if c.get("dst_port") not in (None, "")})
-            card["same_src_unique_dst_ips"] = len({c.get("dst_ip") for c in src_cards if c.get("dst_ip") not in (None, "")})
-            card["same_src_failed_conn_rate"] = round(len(failed) / len(src_cards), 4) if src_cards else 0.0
-            card["same_dst_unique_src_count"] = len({c.get("src_ip") for c in dst_cards if c.get("src_ip") not in (None, "")})
-            card["same_src_same_dst_port_count"] = len(same_src_same_dst_port)
+            card["same_src_conn_count"] = stats.get("conn_count", 0)
+            card["same_src_unique_dst_ports"] = stats.get("unique_dst_ports", 0)
+            card["same_src_unique_dst_ips"] = stats.get("unique_dst_ips", 0)
+            card["same_src_failed_conn_rate"] = stats.get("failed_rate", 0.0)
+            card["same_dst_unique_src_count"] = dst_unique_src_count.get(dst, 0)
+            card["same_src_same_dst_port_count"] = src_dst_port_count.get((src, dst, card.get("dst_port")), 0)
             card["time_window_neighbor_alert_count"] = neighbor_alert_count
 
 
@@ -462,8 +488,8 @@ def main() -> int:
         f"- Session cards: {len(all_cards)}",
         f"- Original uncapped session cards: {original_count}",
         f"- Max cards cap: {args.max_cards if args.max_cards else 'none'}",
-        f"- Output: `{args.output.relative_to(ROOT)}`",
-        f"- LLM-safe output: `{args.llm_output.relative_to(ROOT)}`",
+        f"- Output: `{display_path(args.output)}`",
+        f"- LLM-safe output: `{display_path(args.llm_output)}`",
         "",
         "## Per PCAP counts",
         "",

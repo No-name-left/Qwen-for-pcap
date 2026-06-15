@@ -22,6 +22,14 @@ def as_float(value: Any) -> float | None:
         return None
 
 
+def display_path(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def is_scan_candidate(card: dict[str, Any], min_failed_rate: float) -> bool:
     duration = as_float(card.get("duration"))
     total_bytes = (card.get("orig_bytes") or 0) + (card.get("resp_bytes") or 0)
@@ -73,6 +81,7 @@ def make_scan_group(group: list[dict[str, Any]], idx: int) -> dict[str, Any]:
         "record_id": f"{first['pcap_id']}::scan_group::{idx:06d}",
         "session_id": f"{first['pcap_id']}::scan_group::{idx:06d}",
         "pcap_id": first["pcap_id"],
+        "parser_source": first.get("parser_source"),
         "start_time": min(start_times) if start_times else None,
         "end_time": max(end_times) if end_times else None,
         "src_ip": first.get("src_ip"),
@@ -85,6 +94,7 @@ def make_scan_group(group: list[dict[str, Any]], idx: int) -> dict[str, Any]:
         "dst_ports_sample": ports[:30],
         "failed_conn_rate": round(len(failed) / len(group), 4) if group else 0.0,
         "member_session_ids": [c["session_id"] for c in group],
+        "suricata_evidence_available": any(bool(c.get("suricata_evidence_available")) for c in group),
         "candidate_hint": "TA43_01",
     }
 
@@ -92,6 +102,7 @@ def make_scan_group(group: list[dict[str, Any]], idx: int) -> dict[str, Any]:
 def make_session_record(card: dict[str, Any]) -> dict[str, Any]:
     keep = [
         "pcap_id",
+        "parser_source",
         "start_time",
         "end_time",
         "src_ip",
@@ -110,6 +121,7 @@ def make_session_record(card: dict[str, Any]) -> dict[str, Any]:
         "zeek_uid",
         "tcp_stream",
         "related_suricata_alerts",
+        "suricata_evidence_available",
         "http_summary",
         "dns_summary",
         "tls_summary",
@@ -152,14 +164,14 @@ def main() -> int:
     lines = [
         "# Classification records report",
         "",
-        f"- Input session cards: `{args.session_cards.relative_to(ROOT)}`",
+        f"- Input session cards: `{display_path(args.session_cards)}`",
         f"- Session cards: {len(cards)}",
         f"- Scan groups: {len(scan_groups)}",
         f"- Scan thresholds: window_seconds={args.scan_window_seconds}, min_ports={args.min_scan_ports}, min_sessions={args.min_scan_sessions}, min_failed_rate={args.min_failed_rate}",
         f"- Covered scan member sessions: {len(covered)}",
         f"- Final classification records: {len(records)}",
-        f"- Scan groups output: `{args.scan_groups_output.relative_to(ROOT)}`",
-        f"- Classification records output: `{args.records_output.relative_to(ROOT)}`",
+        f"- Scan groups output: `{display_path(args.scan_groups_output)}`",
+        f"- Classification records output: `{display_path(args.records_output)}`",
         "",
         "## Scan group policy",
         "",

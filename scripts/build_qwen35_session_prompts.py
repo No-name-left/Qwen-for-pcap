@@ -20,12 +20,23 @@ def load_retrieval(path: Path) -> dict[str, list[dict[str, Any]]]:
     return {item.get("record_id") or item.get("event_id"): item.get("snippets", []) for item in data}
 
 
+def display_path(path: Path) -> str:
+    resolved = path.resolve()
+    for base in (ROOT, REAL_MICRO_DIR):
+        try:
+            return str(resolved.relative_to(base))
+        except ValueError:
+            continue
+    return str(path)
+
+
 def compact_record(record: dict[str, Any]) -> dict[str, Any]:
     keys = [
         "record_id",
         "session_id",
         "pcap_id",
         "record_type",
+        "parser_source",
         "start_time",
         "end_time",
         "src_ip",
@@ -41,6 +52,7 @@ def compact_record(record: dict[str, Any]) -> dict[str, Any]:
         "resp_bytes",
         "conn_state",
         "history",
+        "suricata_evidence_available",
         "related_suricata_alerts",
         "http_summary",
         "dns_summary",
@@ -79,6 +91,13 @@ def prompt_text(record: dict[str, Any], task: str, snippets: list[dict[str, Any]
         "You are classifying one PCAP network-flow classification record for a security competition.\n"
         "Return exactly one JSON object and no markdown.\n"
         "Do not use IP/domain reputation. Do not use context from other PCAP files. Do not output legacy labels.\n"
+        "Evidence-first policy: classify from CLASSIFICATION_RECORD first; use RAG only to clarify official-code boundaries.\n"
+        "If record evidence is weak, ambiguous, or ordinary background/business traffic, choose TN01_01.\n"
+        "Do not classify C2 or exploit from DNS/NBNS, short connections, generic outbound traffic, or a single weak feature alone.\n"
+        "However, do not overuse TN01_01 when multiple strong fields jointly indicate attack behavior, such as many outbound connections from one source, high failed-connection context, repeated callback-like services, or scan_group fanout.\n"
+        "Prefer TA43_01 only for multi-port fanout/SYN or failed-connection scan evidence; prefer TA43_02 for service-specific vulnerability probing without exploit payload.\n"
+        "Prefer TA01_02 only when exploit payload, CVE attempt, command injection, SQL/XSS payload, or abnormal exploit response evidence exists.\n"
+        "Use TA11_02 for compromised-host outbound callback/beacon evidence; TA11_01 for operator access to an existing backdoor; TA03_01 for installation/persistence/dropper evidence.\n"
         f"Allowed {code_field} values: {', '.join(allowed)}.\n"
         "The JSON object must contain exactly these fields:\n"
         "{\n"
@@ -110,7 +129,7 @@ def write_prompt_set(records: list[dict[str, Any]], out_dir: Path, task: str, re
         snippets = retrieval.get(record_id, []) if retrieval is not None else None
         path = out_dir / f"{record_id.replace('/', '_').replace(':', '_')}.txt"
         path.write_text(prompt_text(record, task, snippets), encoding="utf-8")
-        manifest.append({"record_id": record_id, "prompt_file": str(path.relative_to(REAL_MICRO_DIR))})
+        manifest.append({"record_id": record_id, "prompt_file": display_path(path)})
     (out_dir / "prompt_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return len(manifest)
 

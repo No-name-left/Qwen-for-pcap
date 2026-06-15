@@ -13,6 +13,14 @@ def load_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def display_path(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def score_chunk(query: dict, chunk: dict) -> tuple[float, dict]:
     query_terms = query.get("query_terms", [])
     query_tokens = set(tokenize(" ".join(query_terms) + " " + query.get("query", "")))
@@ -121,7 +129,7 @@ def main() -> int:
         f"- Retriever mode: {args.retriever_mode}",
         f"- Top K: {args.top_k}",
         f"- Records: {len(results)}",
-        f"- Output: `{args.output.relative_to(ROOT)}`",
+        f"- Output: `{display_path(args.output)}`",
         "",
     ]
     for item in results[:60]:

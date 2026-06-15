@@ -39,6 +39,23 @@ def dedupe(values: list[str]) -> list[str]:
     return out
 
 
+def as_number(value: Any, default: float = 0.0) -> float:
+    if value in (None, "", "-"):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def display_path(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
     terms: list[str] = ["official competition code", "session-level classification", str(record.get("record_type", ""))]
     rules: list[str] = []
@@ -57,10 +74,10 @@ def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
     if record.get("record_type") == "scan_group":
         terms.extend(["scan_group", "many destination ports", "failed connections", "port scan", "TA43_01"])
         rules.append("scan_group:TA43_01")
-    if record.get("same_src_unique_dst_ports", 0) >= 8 or record.get("unique_dst_ports", 0) >= 8:
+    if as_number(record.get("same_src_unique_dst_ports")) >= 8 or as_number(record.get("unique_dst_ports")) >= 8:
         terms.extend(["many ports", "port scan", "TA43_01"])
         rules.append("many_ports:TA43_01")
-    if record.get("same_src_failed_conn_rate", 0) >= 0.5 or record.get("failed_conn_rate", 0) >= 0.5:
+    if as_number(record.get("same_src_failed_conn_rate")) >= 0.5 or as_number(record.get("failed_conn_rate")) >= 0.5:
         terms.extend(["failed connection rate", "reconnaissance", "TA43_01"])
         rules.append("failed_rate")
 
@@ -129,10 +146,10 @@ def main() -> int:
     lines = [
         "# Qwen3.5-27B session-record RAG query report",
         "",
-        f"- Input: `{args.input.relative_to(ROOT) if args.input.exists() and ROOT in args.input.resolve().parents else args.input}`",
+        f"- Input: `{display_path(args.input)}`",
         f"- Records: {len(rows)}",
         f"- Low-signal records: {low_count}",
-        f"- Output: `{args.output.relative_to(ROOT)}`",
+        f"- Output: `{display_path(args.output)}`",
         "",
         "## Rule notes",
         "",
