@@ -1,8 +1,8 @@
 # Keyword index report
 
 - Input chunks: `rag/chunks/rag_chunks.jsonl`
-- Indexed chunks: 84
-- Unique tokens: 1429
+- Indexed chunks: 98
+- Unique tokens: 1513
 - Output: `rag/index/keyword_index.json`
 
 ## Retrieval mode
