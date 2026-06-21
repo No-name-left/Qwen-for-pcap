@@ -28,4 +28,4 @@ A model should cite absence of strong fields rather than invent hidden activity.
 
 ## Relevant event card fields
 
-Weak evidence often appears as low `tshark_features.packet_count`, low `zeek_features.conn_count`, empty `zeek_features.http_uris`, empty `zeek_features.dns_queries`, empty `zeek_features.tls_sni`, and zero `suricata_features.suricata_alert_count`. In that situation, use `attack_type=normal`, `attack_stage=none`, and a low confidence unless another concrete field provides stronger evidence.
+Weak evidence often appears as low packet/connection counts, empty HTTP/DNS/TLS summaries, low byte volume, and no repeated behavior pattern. In that situation, use `TN01_01` with appropriately low confidence unless another concrete field provides stronger evidence.

@@ -9,7 +9,6 @@ from typing import Any
 from qwen35_rag_utils import REAL_MICRO_DIR, ROOT, load_json
 
 
-STAGE_CODES = ["TA43", "TA01", "TA03", "TA11", "TN01"]
 TECHNIQUE_CODES = ["TA43_01", "TA43_02", "TA01_01", "TA01_02", "TA03_01", "TA11_01", "TA11_02", "TN01_01"]
 
 
@@ -52,8 +51,6 @@ def compact_record(record: dict[str, Any]) -> dict[str, Any]:
         "resp_bytes",
         "conn_state",
         "history",
-        "suricata_evidence_available",
-        "related_suricata_alerts",
         "http_summary",
         "dns_summary",
         "tls_summary",
@@ -63,7 +60,6 @@ def compact_record(record: dict[str, Any]) -> dict[str, Any]:
         "same_src_failed_conn_rate",
         "same_dst_unique_src_count",
         "same_src_same_dst_port_count",
-        "time_window_neighbor_alert_count",
         "session_count",
         "unique_dst_ports",
         "dst_ports_sample",
@@ -73,8 +69,9 @@ def compact_record(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def prompt_text(record: dict[str, Any], task: str, snippets: list[dict[str, Any]] | None) -> str:
-    allowed = STAGE_CODES if task == "stage" else TECHNIQUE_CODES
-    code_field = "stage_code" if task == "stage" else "technique_code"
+    if task != "technique":
+        raise ValueError("only technique classification prompts are supported; stage_code is derived deterministically")
+    allowed = TECHNIQUE_CODES
     rag_block = ""
     if snippets is not None:
         trimmed = [
@@ -89,7 +86,8 @@ def prompt_text(record: dict[str, Any], task: str, snippets: list[dict[str, Any]
         rag_block = "\nRAG_TOP5_SNIPPETS:\n" + json.dumps(trimmed, ensure_ascii=False, indent=2)
     return (
         "You are classifying one PCAP network-flow classification record for a security competition.\n"
-        "Return exactly one JSON object and no markdown.\n"
+        "Predict technique_code only. Never predict or output stage_code; the program derives it deterministically.\n"
+        "Return exactly one JSON object. Do not output Markdown, a Thinking Process, or any text outside the JSON object.\n"
         "Do not use IP/domain reputation. Do not use context from other PCAP files. Do not output legacy labels.\n"
         "Evidence-first policy: classify from CLASSIFICATION_RECORD first; use RAG only to clarify official-code boundaries.\n"
         "If record evidence is weak, ambiguous, or ordinary background/business traffic, choose TN01_01.\n"
@@ -98,12 +96,12 @@ def prompt_text(record: dict[str, Any], task: str, snippets: list[dict[str, Any]
         "Prefer TA43_01 only for multi-port fanout/SYN or failed-connection scan evidence; prefer TA43_02 for service-specific vulnerability probing without exploit payload.\n"
         "Prefer TA01_02 only when exploit payload, CVE attempt, command injection, SQL/XSS payload, or abnormal exploit response evidence exists.\n"
         "Use TA11_02 for compromised-host outbound callback/beacon evidence; TA11_01 for operator access to an existing backdoor; TA03_01 for installation/persistence/dropper evidence.\n"
-        f"Allowed {code_field} values: {', '.join(allowed)}.\n"
+        f"Allowed technique_code values: {', '.join(allowed)}. Choose exactly one of these eight values.\n"
         "The JSON object must contain exactly these fields:\n"
         "{\n"
         '  "record_id": string,\n'
         '  "pcap_id": string,\n'
-        '  "record_type": "session" or "scan_group",\n'
+        '  "record_type": "session", "scan_group", or "flow_only",\n'
         '  "start_time": number or null,\n'
         '  "end_time": number or null,\n'
         '  "src_ip": string or null,\n'
@@ -123,6 +121,8 @@ def prompt_text(record: dict[str, Any], task: str, snippets: list[dict[str, Any]
 
 def write_prompt_set(records: list[dict[str, Any]], out_dir: Path, task: str, retrieval: dict[str, list[dict[str, Any]]] | None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
+    for old_prompt in out_dir.glob("*.txt"):
+        old_prompt.unlink()
     manifest = []
     for record in records:
         record_id = record["record_id"]
@@ -145,8 +145,6 @@ def main() -> int:
     records = load_json(args.records) if args.records.exists() else []
     retrieval = load_retrieval(args.retrieval)
     counts = {
-        "prompts_qwen35_27b_stage_no_rag": write_prompt_set(records, args.micro_output_dir / "prompts_qwen35_27b_stage_no_rag", "stage", None),
-        "prompts_qwen35_27b_stage_rag": write_prompt_set(records, args.micro_output_dir / "prompts_qwen35_27b_stage_rag", "stage", retrieval),
         "prompts_qwen35_27b_technique_no_rag": write_prompt_set(records, args.micro_output_dir / "prompts_qwen35_27b_technique_no_rag", "technique", None),
         "prompts_qwen35_27b_technique_rag": write_prompt_set(records, args.micro_output_dir / "prompts_qwen35_27b_technique_rag", "technique", retrieval),
     }
@@ -155,9 +153,9 @@ def main() -> int:
     lines = [
         "# Qwen3.5-27B prompt generation report",
         "",
-        f"- Input classification records: `{args.records.relative_to(ROOT)}`",
+        f"- Input classification records: `{display_path(args.records)}`",
         f"- Records: {len(records)}",
-        f"- Retrieval input: `{args.retrieval.relative_to(ROOT)}`",
+        f"- Retrieval input: `{display_path(args.retrieval)}`",
         "- API calls: none",
         "",
         "## Prompt sets",
@@ -168,8 +166,8 @@ def main() -> int:
         "",
         "## Output constraints",
         "",
-        "- Stage prompts allow only `TA43`, `TA01`, `TA03`, `TA11`, `TN01`.",
         "- Technique prompts allow only `TA43_01`, `TA43_02`, `TA01_01`, `TA01_02`, `TA03_01`, `TA11_01`, `TA11_02`, `TN01_01`.",
+        "- No stage prompts are generated; stage codes are derived deterministically from technique codes.",
         "- RAG prompt sets inject top-5 retrieved snippets.",
         "- The requested result JSON uses `predicted_code`, `confidence`, and one-sentence `reason`.",
     ])

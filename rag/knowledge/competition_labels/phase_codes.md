@@ -11,7 +11,7 @@ safe_for_llm: true
 
 # Official competition stage codes
 
-Stage prediction must use only `TA43`, `TA01`, `TA03`, `TA11`, or `TN01`.
+The program derives stage codes from the selected technique code. Valid derived values are `TA43`, `TA01`, `TA03`, `TA11`, and `TN01`.
 
 - `TA43` is reconnaissance, including clear scanning and probing behavior.
 - `TA01` is initial access, including password brute force and vulnerability exploitation.
@@ -19,7 +19,7 @@ Stage prediction must use only `TA43`, `TA01`, `TA03`, `TA11`, or `TN01`.
 - `TA11` is command and control, including backdoor access or malware callback behavior.
 - `TN01` is normal browsing or business access, and is also the fallback for weak evidence.
 
-The model must not output legacy labels such as `port_scan`, `exploit`, `backdoor`, `c2`, or `normal` as final stage labels.
+The model must not predict or output `stage_code`. It predicts one official `technique_code`, and the exporter applies the fixed parent-stage mapping.
 
 Predictions must be made per session or per scan-group classification record. PCAP files are independent, and no context can be shared across PCAPs.
 

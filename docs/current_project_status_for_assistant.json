@@ -6,18 +6,17 @@
   "mainline": [
     "PCAP",
     "Zeek primary parsing",
-    "Suricata evidence",
-    "tshark fallback only when Zeek/conn.log is unavailable",
+    "tshark packet-level assistance and fallback when Zeek/conn.log is unavailable",
     "session cards",
     "scan_group",
     "RAG retrieval",
     "Qwen3.5-27B or OpenAI-compatible endpoint",
     "official technique code",
-    "deterministic stage fallback",
+    "deterministic technique-to-stage mapping",
     "CSV"
   ],
   "completed": {
-    "zeek_suricata_checks": true,
+    "zeek_tshark_checks": true,
     "zeek_rebuild": {
       "session_cards": 31920,
       "classification_records": 31740,

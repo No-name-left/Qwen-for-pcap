@@ -7,7 +7,7 @@
 | path | status | note |
 | --- | --- | --- |
 | `datasets/raw/` | exists | 原始公开 PCAP 数据目录。 |
-| `outputs/parsed/` | exists | tshark / Zeek / Suricata 离线解析结果。 |
+| `outputs/parsed/` | exists | Zeek / tshark 离线解析结果；Zeek 优先，tshark fallback。 |
 
 ## 中间结果
 
@@ -43,10 +43,10 @@
 
 | path | status | note |
 | --- | --- | --- |
-| `微型test_v2/outputs/prompts_qwen35_27b_stage_no_rag/` | planned / to be generated | 第一阶段 no-RAG prompt。 |
-| `微型test_v2/outputs/prompts_qwen35_27b_stage_rag/` | planned / to be generated | 第一阶段 RAG prompt。 |
 | `微型test_v2/outputs/prompts_qwen35_27b_technique_no_rag/` | planned / to be generated | 第二阶段 no-RAG prompt。 |
 | `微型test_v2/outputs/prompts_qwen35_27b_technique_rag/` | planned / to be generated | 第二阶段 RAG prompt。 |
+
+模型不生成 stage prompt；`stage_code` 从 `technique_code` 确定性映射。
 
 当前历史路径：
 

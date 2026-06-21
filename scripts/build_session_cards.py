@@ -96,22 +96,6 @@ def read_csv_rows(path: Path | None) -> list[dict[str, str]]:
         return list(csv.DictReader(f))
 
 
-def read_suricata_eve(path: Path | None) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    if path is None or not path.exists() or not path.is_file():
-        return rows
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if not line.strip():
-            continue
-        try:
-            item = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(item, dict):
-            rows.append(item)
-    return rows
-
-
 def pcap_dirs(parsed_dir: Path) -> list[Path]:
     if not parsed_dir.exists():
         return []
@@ -131,7 +115,18 @@ def pcap_dirs(parsed_dir: Path) -> list[Path]:
     direct_logs = [parsed_dir / "zeek" / "conn.log", parsed_dir / "conn.log"]
     if any(path.exists() for path in direct_logs):
         return [parsed_dir]
-    return sorted(path for path in parsed_dir.iterdir() if path.is_dir())
+    case_dirs: set[Path] = set()
+    for conn_path in parsed_dir.rglob("conn.log"):
+        if conn_path.parent.name in {"zeek", "logs"}:
+            case_dirs.add(conn_path.parent.parent)
+        else:
+            case_dirs.add(conn_path.parent)
+    for packet_path in parsed_dir.rglob("packets.csv"):
+        if packet_path.parent.name == "tshark":
+            case_dirs.add(packet_path.parent.parent)
+        else:
+            case_dirs.add(packet_path.parent)
+    return sorted(case_dirs)
 
 
 def log_path(case_dir: Path, name: str) -> Path | None:
@@ -143,13 +138,6 @@ def log_path(case_dir: Path, name: str) -> Path | None:
     if name == "ssl.log":
         candidates.extend([case_dir / "zeek" / "tls.log", case_dir / "tls.log"])
     for path in candidates:
-        if path.exists():
-            return path
-    return None
-
-
-def suricata_path(case_dir: Path) -> Path | None:
-    for path in [case_dir / "suricata" / "eve.json", case_dir / "eve.json"]:
         if path.exists():
             return path
     return None
@@ -212,19 +200,6 @@ def packet_len(row: dict[str, str]) -> int:
     return parse_int(row.get("frame.len") or row.get("length") or row.get("len")) or 0
 
 
-def alert_key(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
-    proto = str(row.get("proto") or row.get("app_proto") or "").lower()
-    if proto not in {"tcp", "udp", "icmp"}:
-        proto = "tcp" if row.get("src_port") or row.get("dest_port") else proto
-    return (
-        str(row.get("src_ip") or ""),
-        str(row.get("src_port") or ""),
-        str(row.get("dest_ip") or row.get("dst_ip") or ""),
-        str(row.get("dest_port") or row.get("dst_port") or ""),
-        proto,
-    )
-
-
 def rows_by_uid(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     out: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -269,26 +244,8 @@ def make_tls_summary(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     }
 
 
-def make_alert_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    alerts = []
-    for row in rows:
-        if row.get("event_type") != "alert" and "alert" not in row:
-            continue
-        alert = row.get("alert") if isinstance(row.get("alert"), dict) else {}
-        alerts.append(
-            {
-                "timestamp": row.get("timestamp"),
-                "signature": alert.get("signature") or row.get("signature"),
-                "category": alert.get("category") or row.get("category"),
-                "severity": alert.get("severity") or row.get("severity"),
-            }
-        )
-    return alerts[:20]
-
-
 def build_cards_from_packets(
     packet_rows: list[dict[str, str]],
-    alert_index: dict[tuple[str, str, str, str, str], list[dict[str, Any]]],
     pcap_id: str,
 ) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, str, str, str, str], list[dict[str, str]]] = defaultdict(list)
@@ -334,8 +291,6 @@ def build_cards_from_packets(
             "history": "tshark_fallback",
             "zeek_uid": None,
             "tcp_stream": tcp_stream[0] if tcp_stream else None,
-            "related_suricata_alerts": make_alert_summary(alert_index.get(key, [])),
-            "suricata_evidence_available": bool(alert_index),
             "http_summary": make_http_summary(rows) if any(row.get("http.host") or row.get("http.request.uri") for row in rows) else None,
             "dns_summary": make_dns_summary([{"query": row.get("dns.qry.name")} for row in rows if row.get("dns.qry.name")]),
             "tls_summary": make_tls_summary([{"server_name": row.get("tls.handshake.extensions_server_name")} for row in rows if row.get("tls.handshake.extensions_server_name")]),
@@ -351,11 +306,8 @@ def build_cards_for_pcap(case_dir: Path, pcap_id: str) -> list[dict[str, Any]]:
     tls_by_uid = rows_by_uid(read_zeek_log(log_path(case_dir, "ssl.log")))
     packet_rows = read_csv_rows(packets_path(case_dir))
     packet_index = build_side_indexes(packet_rows, packet_key)
-    alert_rows = read_suricata_eve(suricata_path(case_dir))
-    alert_index = build_side_indexes(alert_rows, alert_key)
-
     if not conn_rows and packet_rows:
-        return build_cards_from_packets(packet_rows, alert_index, pcap_id)
+        return build_cards_from_packets(packet_rows, pcap_id)
 
     cards: list[dict[str, Any]] = []
     for idx, row in enumerate(conn_rows, start=1):
@@ -366,7 +318,6 @@ def build_cards_for_pcap(case_dir: Path, pcap_id: str) -> list[dict[str, Any]]:
         uid = row.get("uid")
         key = (src_ip, src_port, dst_ip, dst_port, proto)
         packets = packet_index.get(key, [])
-        related_alerts = make_alert_summary(alert_index.get(key, []))
         tcp_stream = sample([p.get("tcp.stream") for p in packets], 1)
         card = {
             "record_type": "session",
@@ -390,8 +341,6 @@ def build_cards_for_pcap(case_dir: Path, pcap_id: str) -> list[dict[str, Any]]:
             "history": row.get("history") if row.get("history") != "-" else None,
             "zeek_uid": uid,
             "tcp_stream": tcp_stream[0] if tcp_stream else None,
-            "related_suricata_alerts": related_alerts,
-            "suricata_evidence_available": bool(alert_rows),
             "http_summary": make_http_summary(http_by_uid.get(str(uid), [])) if uid else None,
             "dns_summary": make_dns_summary(dns_by_uid.get(str(uid), [])) if uid else None,
             "tls_summary": make_tls_summary(tls_by_uid.get(str(uid), [])) if uid else None,
@@ -429,26 +378,16 @@ def add_context_features(cards: list[dict[str, Any]]) -> None:
         }
         src_dst_port_count = {key: len(value) for key, value in by_src_dst_port.items()}
 
-        alert_times = [
-            card.get("start_time")
-            for card in pcap_cards
-            if card.get("related_suricata_alerts") and isinstance(card.get("start_time"), (int, float))
-        ]
         for card in pcap_cards:
             src = str(card.get("src_ip"))
             dst = str(card.get("dst_ip"))
             stats = src_stats.get(src, {})
-            start = card.get("start_time")
-            neighbor_alert_count = 0
-            if isinstance(start, (int, float)):
-                neighbor_alert_count = sum(1 for t in alert_times if isinstance(t, (int, float)) and abs(t - start) <= 60)
             card["same_src_conn_count"] = stats.get("conn_count", 0)
             card["same_src_unique_dst_ports"] = stats.get("unique_dst_ports", 0)
             card["same_src_unique_dst_ips"] = stats.get("unique_dst_ips", 0)
             card["same_src_failed_conn_rate"] = stats.get("failed_rate", 0.0)
             card["same_dst_unique_src_count"] = dst_unique_src_count.get(dst, 0)
             card["same_src_same_dst_port_count"] = src_dst_port_count.get((src, dst, card.get("dst_port")), 0)
-            card["time_window_neighbor_alert_count"] = neighbor_alert_count
 
 
 def main() -> int:
@@ -463,8 +402,13 @@ def main() -> int:
     all_cards: list[dict[str, Any]] = []
     per_pcap: dict[str, int] = {}
     warnings: list[str] = []
-    for case_dir in pcap_dirs(args.parsed_dir):
-        pcap_id = case_dir.name if case_dir != args.parsed_dir else "parsed"
+    discovered_case_dirs = pcap_dirs(args.parsed_dir)
+    for case_dir in discovered_case_dirs:
+        if case_dir == args.parsed_dir:
+            pcap_id = "parsed"
+        else:
+            relative = case_dir.relative_to(args.parsed_dir)
+            pcap_id = "__".join(relative.parts)
         cards = build_cards_for_pcap(case_dir, pcap_id)
         if not cards:
             warnings.append(f"No Zeek conn sessions found for `{pcap_id}`.")
@@ -472,10 +416,16 @@ def main() -> int:
         all_cards.extend(cards)
 
     if not args.parsed_dir.exists():
-        warnings.append(f"Parsed input directory does not exist: `{args.parsed_dir.relative_to(ROOT)}`.")
+        warnings.append(f"Parsed input directory does not exist: `{display_path(args.parsed_dir)}`.")
+    elif not discovered_case_dirs:
+        warnings.append(f"No case directory containing Zeek conn.log or tshark packets.csv was found under `{display_path(args.parsed_dir)}`.")
 
     add_context_features(all_cards)
     original_count = len(all_cards)
+    if original_count == 0:
+        raise RuntimeError(
+            f"no session cards were built from {args.parsed_dir}; expected Zeek conn.log or tshark packets.csv in a case directory"
+        )
     if args.max_cards and args.max_cards > 0:
         all_cards = sorted(all_cards, key=lambda c: (c.get("pcap_id") or "", c.get("start_time") is None, c.get("start_time") or 0, c.get("session_id") or ""))[: args.max_cards]
     write_json(args.output, all_cards)

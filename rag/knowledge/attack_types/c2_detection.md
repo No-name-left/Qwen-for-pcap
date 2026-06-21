@@ -16,7 +16,7 @@ C2 evidence includes malware checkin signatures, beacon-like periodicity, suspic
 
 ## Judgment
 
-Classify as c2 when the event suggests an established channel for remote instructions or status exchange. Strong Suricata categories such as Malware Command and Control Activity can carry high weight.
+Classify as C2-like behavior when repeated outbound sessions suggest an established channel for remote instructions or status exchange. Require multiple corroborating connection, timing, service, DNS, HTTP, or TLS indicators.
 
 ## Stage mapping
 

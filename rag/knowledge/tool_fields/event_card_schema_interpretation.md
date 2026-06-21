@@ -12,11 +12,11 @@ safe_for_llm: true
 
 ## Evidence
 
-An event card aggregates tshark, Zeek, and Suricata evidence for one traffic slice. source_presence tells which tools contributed data; candidate_labels are heuristic hints, not ground truth.
+A session card aggregates Zeek connection/application summaries and tshark packet/stream evidence for one traffic session. Parser source and behavior statistics describe which evidence is available; heuristic hints are not ground truth.
 
 ## Judgment
 
-The model should cite concrete fields such as packet_count, unique_dst_ports, conn_count, failed_conn_rate, dns_queries, http_uri_samples, tls_sni_samples, suricata_alert_count, and top signatures.
+The model should cite concrete fields such as packet counts, unique destination ports, connection state/history, failed-connection rate, DNS queries, HTTP URI samples, TLS SNI samples, duration, and byte counts.
 
 ## Stage mapping
 

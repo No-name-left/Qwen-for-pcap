@@ -1,6 +1,6 @@
 # Docker deployment notes
 
-The competition environment may provide an organizer-maintained Docker image. Prefer the official image when available because it can include approved versions of Python, tshark, Zeek, Suricata, CUDA libraries, or local model serving tools.
+The competition environment may provide an organizer-maintained Docker image. Prefer the official image when available because it can include approved versions of Python, tshark, Zeek, CUDA libraries, or local model serving tools. Suricata is not used by the current pipeline.
 
 ## Expected usage
 
@@ -21,4 +21,4 @@ If the organizer provides a model-serving container, expose an OpenAI-compatible
 http://127.0.0.1:8000/v1
 ```
 
-The default one-click scripts do not call this endpoint unless the user explicitly passes `--run-api`.
+The offline pipeline scripts do not call this endpoint. Invoke `scripts/run_qwen_openai_compatible.py` explicitly after reviewing the generated technique prompts.

@@ -1,7 +1,7 @@
 # RAG chunks report
 
-- Source documents: 94
-- Chunks generated: 98
+- Source documents: 92
+- Chunks generated: 94
 - Output: `rag/chunks/rag_chunks.jsonl`
 
 ## Chunks by category
@@ -12,5 +12,5 @@
 - competition_labels: 24
 - false_positive_rules: 9
 - protocols: 9
-- signatures: 23
-- tool_fields: 10
+- signatures: 21
+- tool_fields: 8

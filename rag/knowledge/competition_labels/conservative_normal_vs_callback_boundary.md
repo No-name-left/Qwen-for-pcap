@@ -11,7 +11,7 @@ safe_for_llm: true
 
 # Conservative normal versus callback boundary
 
-Conservative normal policy means avoiding attack labels when the record has only generic DNS, NBNS, short connection, or low-detail flow features. It does not mean every record without a Suricata alert is normal.
+Conservative normal policy means avoiding attack labels when the record has only generic DNS, NBNS, short connection, or low-detail flow features. It does not mean every record without an explicit detector indicator is normal.
 
 Use `TA11_02` when the record evidence shows compromised-host outbound communication patterns such as repeated external callbacks, many outbound connections from the same source, high failed-connection context, asymmetric bytes, IRC/HTTP callback-like services, or C2/callback signatures.
 

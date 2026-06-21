@@ -28,8 +28,8 @@ Do not high-confidence classify attacks from invalid checksum or unknown code al
 
 ## Relevant event card fields
 
-Check `suricata_alerts.signature` and `suricata_alerts.category` for phrases such as invalid checksum, unknown code, ICMPv6, UDPv6, malformed, or protocol anomaly. If `suricata_features.top_alert_signatures` only contains these low-specificity alerts and there is no exploit, C2, malware, flood, or scan evidence, prefer `normal/none` with low confidence.
+Check Zeek weird/notice evidence and tshark protocol fields for invalid checksum, unknown code, ICMPv6, UDPv6, malformed, or protocol anomaly indicators. If these low-specificity anomalies are the only evidence, prefer `TN01_01` with low confidence.
 
 ## Source grounding
 
-Grounded by Suricata decoder/app-layer alert semantics and local rules for invalid checksum, unknown code, ICMPv6, UDPv6, malformed, and protocol anomaly messages. These alerts are IDS evidence but weak by themselves. Without exploit, C2, malware, flood, or scan evidence in the same event card, they should remain low confidence and often map to `normal / none`.
+Protocol decoder anomalies are weak by themselves. Without exploit, callback, malware, flood, or scan evidence in the same session, they should remain low confidence and usually map to `TN01_01`.

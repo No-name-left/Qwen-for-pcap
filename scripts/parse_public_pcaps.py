@@ -55,21 +55,6 @@ def list_files(path: Path) -> list[str]:
     return sorted(p.name for p in path.iterdir() if p.is_file())
 
 
-def count_suricata_alerts(eve_path: Path) -> int:
-    if not eve_path.exists():
-        return 0
-    alerts = 0
-    with eve_path.open("r", encoding="utf-8", errors="replace") as handle:
-        for line in handle:
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if event.get("event_type") == "alert":
-                alerts += 1
-    return alerts
-
-
 def concise_error(stderr: str) -> str:
     lines: list[str] = []
     for line in stderr.splitlines():
@@ -101,13 +86,12 @@ def discover_pcaps(input_dir: Path, dataset_id: str | None) -> list[tuple[str, P
     return out
 
 
-def parse_case(case_id: str, pcap: Path, output_dir: Path, rules: Path | None) -> dict:
+def parse_case(case_id: str, pcap: Path, output_dir: Path) -> dict:
     pcap_abs = pcap.resolve()
     case_dir = output_dir / case_id
     tshark_dir = case_dir / "tshark"
     zeek_dir = case_dir / "zeek"
-    suricata_dir = case_dir / "suricata"
-    for d in (tshark_dir, zeek_dir, suricata_dir):
+    for d in (tshark_dir, zeek_dir):
         d.mkdir(parents=True, exist_ok=True)
 
     warnings: list[str] = []
@@ -150,25 +134,7 @@ def parse_case(case_id: str, pcap: Path, output_dir: Path, rules: Path | None) -
         (zeek_dir / "zeek_run.stderr").write_text("zeek missing\n", encoding="utf-8")
         warnings.append("zeek missing; session card builder will use tshark packet aggregation fallback")
 
-    suricata_rc = None
-    if command_exists("suricata"):
-        suricata_cmd = ["suricata", "--runmode", "single", "-r", str(pcap_abs), "-l", str(suricata_dir), "-k", "none"]
-        if rules and rules.exists():
-            suricata_cmd.extend(["-S", str(rules)])
-        suricata_rc, suricata_out, suricata_err = run(suricata_cmd)
-        (suricata_dir / "suricata_run.stdout").write_text(suricata_out, encoding="utf-8")
-        (suricata_dir / "suricata_run.stderr").write_text(suricata_err, encoding="utf-8")
-        (suricata_dir / "suricata_run.status").write_text(str(suricata_rc), encoding="utf-8")
-        if suricata_rc != 0:
-            warnings.append(f"suricata failed rc={suricata_rc}: {concise_error(suricata_err)}")
-    else:
-        warnings.append("suricata missing; alerts not generated")
-
     zeek_logs = [f for f in list_files(zeek_dir) if f.endswith(".log") and not f.startswith("zeek_run.")]
-    suricata_files = list_files(suricata_dir)
-    alert_count = count_suricata_alerts(suricata_dir / "eve.json")
-    if (suricata_dir / "eve.json").exists() and alert_count == 0:
-        warnings.append("suricata eve.json exists but no alert events matched enabled rules")
 
     return {
         "case_id": case_id,
@@ -176,11 +142,9 @@ def parse_case(case_id: str, pcap: Path, output_dir: Path, rules: Path | None) -
         "pcap_size": pcap.stat().st_size if pcap.exists() else None,
         "tshark_success": tshark_rc == 0 and packets_csv.exists() and packets_csv.stat().st_size > 0,
         "zeek_success": zeek_rc == 0,
-        "suricata_success": suricata_rc == 0 and (suricata_dir / "eve.json").exists(),
         "tshark_packets_csv": display_path(packets_csv),
         "zeek_generated_logs": zeek_logs,
-        "suricata_generated_files": suricata_files,
-        "suricata_alert_count": alert_count,
+        "session_parser_preference": "zeek_conn_then_tshark_fallback",
         "warnings": warnings,
     }
 
@@ -190,12 +154,11 @@ def main() -> int:
     parser.add_argument("--input-dir", type=Path, default=ROOT / "datasets/public/feasibility/raw")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "outputs/parsed/feasibility")
     parser.add_argument("--dataset-id", default=None)
-    parser.add_argument("--rules", type=Path, default=ROOT / "outputs/parsed/suricata_rules/suricata.rules")
     args = parser.parse_args()
 
     cases = discover_pcaps(args.input_dir, args.dataset_id)
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    summary = [parse_case(case_id, pcap, args.output_dir, args.rules) for case_id, pcap in cases]
+    summary = [parse_case(case_id, pcap, args.output_dir) for case_id, pcap in cases]
     (args.output_dir / "parse_all_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"parsed {len(summary)} pcap files")
     return 0

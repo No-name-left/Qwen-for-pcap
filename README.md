@@ -1,18 +1,18 @@
 # Qwen-for-pcap
 
-Qwen-for-pcap is a PCAP/session-level network traffic classification pipeline for official competition stage and technique codes. The current mainline is Zeek-first, with Suricata evidence and tshark fallback only when Zeek or `conn.log` is unavailable.
+Qwen-for-pcap is a PCAP/session-level network traffic classification pipeline for official competition stage and technique codes. The current mainline is Zeek-first, with tshark packet-level assistance and fallback when Zeek or `conn.log` is unavailable. Suricata is not part of the current mainline.
 
 ## Current Mainline
 
 ```text
 PCAP
--> Zeek / Suricata / tshark fallback
+-> Zeek / tshark fallback
 -> session cards and scan_group records
 -> deterministic RAG query
 -> keyword RAG retrieval
--> Qwen3.5-27B or another OpenAI-compatible endpoint
+-> Qwen3.5 or another OpenAI-compatible endpoint predicts technique_code only
 -> official technique_code
--> deterministic stage fallback
+-> deterministic technique_code-to-stage_code mapping
 -> CSV export
 ```
 
@@ -100,11 +100,12 @@ bash run_stage2.sh
 API configuration is environment-only:
 
 ```bash
-export LLM_BASE_URL="https://router.huggingface.co/v1"
-export LLM_API_KEY="<set outside repo>"
-export LLM_MODEL_NAME="Qwen/Qwen3.5-27B:novita"
-export RUN_API=1
+export BASE_URL="http://127.0.0.1:8000/v1"
+export API_KEY="EMPTY"
+export MODEL="qwen3.5"
 ```
+
+The runner sends Qwen `chat_template_kwargs.enable_thinking=false` by default. Use `--disable-extra-body` for online providers that reject this extension. The offline stage scripts never call an API; invoke `scripts/run_qwen_openai_compatible.py` explicitly with a technique prompt directory.
 
 Do not run API batches blindly. Use the current small coverage set first, inspect the reports, then expand only if error analysis improves.
 
@@ -124,4 +125,4 @@ Archived legacy reports are under `docs/archive/`, `rag/reports/archive/`, and `
 - Do not commit `.env`, tokens, PCAP/cap/pcapng, binetflow, large raw datasets, prompt directories, API raw responses, parsed model outputs, model weights, or LoRA adapters.
 - Do not use official test data for training, RAG, or local eval construction.
 - Do not treat low-confidence or flow-only labels as high-confidence PCAP evidence.
-- Zeek is the main parser; tshark is only a fallback.
+- Zeek is the main parser; tshark provides packet-level assistance and fallback. Suricata is not used.

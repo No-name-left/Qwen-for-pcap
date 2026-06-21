@@ -12,7 +12,7 @@ safe_for_llm: true
 
 ## Evidence
 
-MS17-010 refers to SMBv1 remote code execution vulnerabilities. Evidence may include Suricata signatures naming MS17-010, EternalBlue, SMB exploit, or vulnerability-specific SMB behavior on ports 445 or 139.
+MS17-010 refers to SMBv1 remote code execution vulnerabilities. Evidence may include MS17-010/EternalBlue strings, abnormal SMB exploit exchanges, or vulnerability-specific behavior on ports 445 or 139.
 
 ## Judgment
 
@@ -28,8 +28,8 @@ Port 445 alone is not enough. Ordinary file sharing, domain operations, and admi
 
 ## Relevant event card fields
 
-Useful fields include `suricata_alerts.signature` with MS17-010, EternalBlue, or SMB exploit wording; `suricata_alerts.category` indicating exploit activity; destination port evidence such as port 445; and protocol context from SMB or TCP features. Together these support `attack_type=exploit`, subtype `smb_exploit`, and `attack_stage=initial_access`.
+Useful fields include MS17-010, EternalBlue, or SMB exploit wording in available content; destination-port evidence such as 445; and SMB/TCP connection context. Together these can support `TA01_02` when exploitation rather than scanning is shown.
 
 ## Source grounding
 
-Grounded by Microsoft MS17-010 official bulletin, SMB/EternalBlue public references, Suricata alert metadata, and local ET Open rule messages. MS17-010 relates to SMBv1 remote code execution; when MS17-010, SMBv1, port 445, and SMB exploit wording appear together, the mapping is usually `exploit / initial_access`. If MS17-010 and DOUBLEPULSAR both appear, MS17-010 describes vulnerability use while DOUBLEPULSAR is closer to post-exploitation implant or callback behavior.
+Grounded by Microsoft MS17-010 official bulletin and SMB/EternalBlue public references. When MS17-010, SMBv1, port 445, and exploit behavior appear together, the mapping is usually `TA01_02`. DOUBLEPULSAR evidence is closer to post-exploitation implant, access, or callback boundaries.

@@ -22,7 +22,7 @@ outputs/session_cards/llm_session_cards_all.json
 
 ## 2. Deterministic RAG Query Builder
 
-Input a session card and build `rag_query` without AI. Use protocols, ports, Zeek fields, tshark stream statistics, Suricata signatures/categories, DNS names, HTTP fields, TLS SNI, and compact behavior summaries. Do not read evaluation files or expected labels.
+Input a session card and build `rag_query` without AI. Use protocols, ports, Zeek fields, tshark stream statistics, DNS names, HTTP fields, TLS SNI, and compact behavior summaries. Do not read evaluation files or expected labels.
 
 Recommended output:
 
@@ -56,30 +56,28 @@ Recommended output:
 outputs/rag_retrieval/
 ```
 
-## 6. Stage and Technique Prompt Builders
+## 6. Technique Prompt Builders
 
-Generate separate prompt sets for:
+Generate RAG and no-RAG technique prompt sets for:
 
 ```text
-微型test_v2/outputs/prompts_qwen35_27b_stage_no_rag/
-微型test_v2/outputs/prompts_qwen35_27b_stage_rag/
 微型test_v2/outputs/prompts_qwen35_27b_technique_no_rag/
 微型test_v2/outputs/prompts_qwen35_27b_technique_rag/
 ```
 
-Prompt output should request `stage_code` for stage 1 or `technique_code` for stage 2. Do not request legacy `attack_type` / `attack_stage` as final fields.
+Prompt output requests one official `technique_code`. It must not request `stage_code`; the exporter derives stage deterministically.
 
 ## 7. Qwen3.5-27B Runner
 
 Use `configs/llm_qwen35_27b.yaml` and environment variables:
 
 ```bash
-export LLM_BASE_URL="https://router.huggingface.co/v1"
-export LLM_API_KEY="<set outside repo>"
-export LLM_MODEL_NAME="Qwen/Qwen3.5-27B:novita"
+export BASE_URL="http://127.0.0.1:8000/v1"
+export API_KEY="EMPTY"
+export MODEL="qwen3.5"
 ```
 
-Fallback model name: `Qwen/Qwen3.5-27B`. Never write real tokens into code, prompts, configs, reports, or logs.
+The `LLM_*` aliases remain supported. Never write real tokens into code, prompts, configs, reports, or logs.
 
 ## 8. CSV Exporter
 

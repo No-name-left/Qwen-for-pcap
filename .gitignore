@@ -69,6 +69,7 @@ datasets/public/**/*.pcap
 datasets/public/**/*.pcapng
 datasets/public/**/*.cap
 datasets/public/**/*.binetflow
+datasets/public/**/*.binetflow.*
 datasets/public/**/*.csv
 !datasets/metadata/*.csv
 !datasets/public/**/metadata/*.csv

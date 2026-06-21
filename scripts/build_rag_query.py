@@ -65,11 +65,13 @@ def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
     add_term(terms, record.get("service"))
     add_term(terms, record.get("conn_state"))
     add_term(terms, record.get("history"))
-    add_term(terms, record.get("candidate_hint"))
+    for field in ("duration", "orig_pkts", "resp_pkts", "orig_bytes", "resp_bytes"):
+        value = record.get(field)
+        if value not in (None, "", "-"):
+            terms.append(f"{field}={value}")
     add_term(terms, record.get("http_summary"))
     add_term(terms, record.get("dns_summary"))
     add_term(terms, record.get("tls_summary"))
-    add_term(terms, record.get("related_suricata_alerts"))
 
     if record.get("record_type") == "scan_group":
         terms.extend(["scan_group", "many destination ports", "failed connections", "port scan", "TA43_01"])
@@ -102,11 +104,12 @@ def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
         terms.extend(["callback", "C2", "periodic beacon", "TA11_02"])
         rules.append("callback_c2:TA11_02")
 
-    alert_count = len(record.get("related_suricata_alerts") or [])
     packets = (record.get("orig_pkts") or 0) + (record.get("resp_pkts") or 0)
-    if record.get("record_type") == "session" and alert_count == 0 and packets <= 3 and not rules:
+    total_bytes = (record.get("orig_bytes") or 0) + (record.get("resp_bytes") or 0)
+    has_app_summary = any(record.get(field) for field in ("http_summary", "dns_summary", "tls_summary"))
+    if record.get("record_type") == "session" and packets <= 3 and total_bytes <= 512 and not has_app_summary and not rules:
         terms.extend(["normal business", "weak-only signal", "TN01_01"])
-        rules.append("low_signal:TN01_01")
+        rules.append("low_volume_no_behavior_pattern:TN01_01")
         low_signal = True
     if not rules:
         terms.extend(["normal business", "weak-only signal", "TN01_01"])

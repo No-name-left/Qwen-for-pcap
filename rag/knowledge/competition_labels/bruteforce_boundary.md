@@ -11,7 +11,7 @@ safe_for_llm: true
 
 # Password brute force boundary
 
-Use `TA01_01` when a record shows repeated authentication attempts, many failures, repeated login sessions, Suricata brute-force signatures, or protocol evidence for SSH, FTP, RDP, SMB, HTTP login, or similar authentication endpoints.
+Use `TA01_01` when a record shows repeated authentication attempts, many failures, repeated login sessions, or corroborating protocol evidence for SSH, FTP, RDP, SMB, HTTP login, or similar authentication endpoints.
 
 Single failed logins, isolated resets, or normal connection retries are weak evidence and should generally map to `TN01_01`.
 

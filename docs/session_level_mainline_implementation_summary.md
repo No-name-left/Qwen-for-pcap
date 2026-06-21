@@ -4,7 +4,7 @@
 
 `READY_FOR_QWEN35_SESSION_API_TEST`
 
-The offline session-level mainline skeleton is implemented and runs without API calls. Current generated record counts are zero because this clone does not contain `outputs/parsed/`; once parsed PCAP outputs are placed there, the same scripts can generate real session cards, scan groups, RAG queries, prompts, and CSV rows.
+The offline session-level mainline runs without API calls and now fails clearly instead of silently accepting zero session cards. It recursively discovers case directories below `outputs/parsed/`. The model prompt path is technique-only; stage codes are derived deterministically.
 
 ## Added and modified files
 
@@ -66,7 +66,7 @@ Updated generated RAG artifacts:
 - RAG official-code documents joined: yes.
 - Chunks/index rebuilt: yes.
 - RAG query/retrieval supports `record_id`: yes.
-- Four prompt sets generated: yes, with empty manifests because record count is 0.
+- Two technique prompt sets are generated: RAG and no-RAG. Stage prompt generation is disabled.
 - CSV export script generated: yes.
 - Dry-run CSV generated: yes, with 0 rows because record count is 0.
 - Deployment docs generated: yes.
@@ -81,8 +81,6 @@ Updated generated RAG artifacts:
 - `outputs/session_cards/classification_records_all.json`
 - `outputs/rag_queries/qwen35_session_records_rag_queries.jsonl`
 - `outputs/rag_retrieval/qwen35_session_records_retrieved_knowledge_top5.json`
-- `微型test_v2/outputs/prompts_qwen35_27b_stage_no_rag/`
-- `微型test_v2/outputs/prompts_qwen35_27b_stage_rag/`
 - `微型test_v2/outputs/prompts_qwen35_27b_technique_no_rag/`
 - `微型test_v2/outputs/prompts_qwen35_27b_technique_rag/`
 - `outputs/submissions/stage1_submission.csv`

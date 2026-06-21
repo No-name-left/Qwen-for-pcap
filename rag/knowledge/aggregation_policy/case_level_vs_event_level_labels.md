@@ -28,4 +28,4 @@ Future evaluation should add precise event-level labels where possible.
 
 ## Relevant event card fields
 
-When evaluating model output, compare the prediction to the event's own evidence first. Case-level references can be useful for rough agreement, but fields such as `suricata_alerts.signature`, `zeek_features.failed_conn_rate`, `tshark_features.unique_dst_ports`, and semantic samples are better evidence for an individual event decision.
+When evaluating model output, compare the prediction to the session's own evidence first. Case-level references can be useful for rough agreement, but Zeek connection state/history, failed-connection rate, tshark destination-port fanout, and protocol semantic samples are better evidence for an individual decision.

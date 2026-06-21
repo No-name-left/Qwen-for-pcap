@@ -113,7 +113,7 @@ def main() -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     write_json(args.output_dir / "selected_records.json", selected)
 
-    for prompt_dir_name, task in [("prompts_technique_rag", "technique"), ("prompts_stage_rag", "stage")]:
+    for prompt_dir_name, task in [("prompts_technique_rag", "technique")]:
         prompt_dir = args.output_dir / prompt_dir_name
         prompt_dir.mkdir(parents=True, exist_ok=True)
         for old in prompt_dir.glob("*.txt"):
@@ -153,11 +153,10 @@ def main() -> int:
         "",
         f"- Selected records: {len(selected)}",
         f"- Technique RAG prompts: {len(list((args.output_dir / 'prompts_technique_rag').glob('*.txt')))}",
-        f"- Stage RAG prompts: {len(list((args.output_dir / 'prompts_stage_rag').glob('*.txt')))}",
         f"- Contains scan_group and session: {str(scan_group_present and session_present).lower()}",
         "- RAG prompts include retrieved knowledge snippets from the feasibility retrieval outputs.",
         "- Technique allowed codes: `TA43_01`, `TA43_02`, `TA01_01`, `TA01_02`, `TA03_01`, `TA11_01`, `TA11_02`, `TN01_01`.",
-        "- Stage allowed codes: `TA43`, `TA01`, `TA03`, `TA11`, `TN01`.",
+        "- Stage prompts are not generated; stage codes are derived from technique codes.",
         "- Public labels or local generated labels are not written into prompts.",
     ]
     (args.output_dir / "prompt_subset_report.md").write_text("\n".join(prompt_lines) + "\n", encoding="utf-8")

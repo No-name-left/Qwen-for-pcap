@@ -11,11 +11,9 @@ This file records lightweight source-grounding references. It stores URL status,
 
 - MITRE ATT&CK: tactic and stage terminology.
 - Zeek official docs: conn.log and dns.log field semantics.
-- Suricata official docs: EVE JSON and alert field semantics.
 - Microsoft MS17-010: SMBv1 remote-code-execution and SMB exploit grounding.
 - STRRAT public sources: Java RAT / Remote Access Trojan / C2 and checkin behavior.
 - DOUBLEPULSAR public sources: backdoor / implant / post-exploitation / beacon behavior.
-- Local ET Open rules: concrete Suricata msg, classtype, and sid metadata.
 
 ## URL checks
 
@@ -27,7 +25,6 @@ This file records lightweight source-grounding references. It stores URL status,
 - MITRE Command and Control: `200`; title/summary: Command and Control, Tactic TA0011 - Enterprise | MITRE ATT&CK®; usage: Command-and-control-stage grounding.; URL: https://attack.mitre.org/tactics/TA0011/
 - Zeek conn.log: `200`; title/summary: conn.log — Book of Zeek (9.0.0-dev.369); usage: Zeek connection-summary fields.; URL: https://docs.zeek.org/en/master/reference/logs/conn.html
 - Zeek dns.log: `200`; title/summary: dns.log — Book of Zeek (9.0.0-dev.369); usage: Zeek DNS fields.; URL: https://docs.zeek.org/en/master/reference/logs/dns.html
-- Suricata EVE JSON format: `200`; title/summary: 15.1.2. Eve JSON Format — Suricata 9.0.0-dev documentation; usage: Suricata EVE alert fields.; URL: https://docs.suricata.io/en/latest/output/eve/eve-json-format.html
 - Microsoft MS17-010: `200`; title/summary: Microsoft Security Bulletin MS17-010 - Critical | Microsoft Learn; usage: SMBv1 RCE and SMB exploit grounding.; URL: https://learn.microsoft.com/en-us/security-updates/securitybulletins/2017/ms17-010
 - Malpedia STRRAT jar.strrat: `200`; title/summary: STRRAT (Malware Family); usage: Stable STRRAT malware-family grounding.; URL: https://malpedia.caad.fkie.fraunhofer.de/details/jar.strrat
 - NHS Digital STRRAT CC-3867: `failed_to_fetch`; title/summary: HTTP Error 403: Forbidden; usage: Backup STRRAT public reference.; URL: https://digital.nhs.uk/cyber-alerts/2021/cc-3867
@@ -36,7 +33,6 @@ This file records lightweight source-grounding references. It stores URL status,
 - NHS Digital DoublePulsar CC-1354: `failed_to_fetch`; title/summary: HTTP Error 403: Forbidden; usage: Backup DoublePulsar / SMB post-exploitation reference.; URL: https://digital.nhs.uk/cyber-alerts/2017/cc-1354
 - Help Net Security DoublePulsar: `200`; title/summary: Tens of thousands Windows systems implanted with NSA's DoublePulsar - Help Net Security; usage: Stable DoublePulsar backdoor reference.; URL: https://www.helpnetsecurity.com/2017/04/24/windows-doublepulsar-backdoor/
 - ExtraHop DoublePulsar detected: `200`; title/summary: DoublePulsar Detected — ExtraHop; usage: Stable DoublePulsar detection reference.; URL: https://www.extrahop.com/blog/double-pulsar-detected
-- Local ET Open rules: `local_file`; title/summary: outputs/parsed/suricata_rules/suricata.rules; usage: Local Suricata msg/classtype/sid grounding.; URL: outputs/parsed/suricata_rules/suricata.rules
 - Deprecated Malpedia STRRAT win.strrat: `failed_to_fetch`; title/summary: HTTP Error 404: Not Found; usage: Deprecated failed STRRAT URL; replaced by jar.strrat plus backups.; URL: https://malpedia.caad.fkie.fraunhofer.de/details/win.strrat
 - Deprecated CISA SMB/DOUBLEPULSAR page: `failed_to_fetch`; title/summary: HTTP Error 404: Not Found; usage: Deprecated failed DOUBLEPULSAR-related URL; replaced by NHS, Help Net Security, ExtraHop, and Microsoft MS17-010.; URL: https://www.cisa.gov/news-events/alerts/2017/06/12/microsoft-windows-smbv1-vulnerability-and-mitigation
 

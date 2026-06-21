@@ -6,7 +6,7 @@ openEuler environments may use `dnf` or `yum` instead of `apt`. Deployment scrip
 
 - Confirm Python 3 is available.
 - Confirm `pip` or a site-approved Python package workflow is available.
-- Confirm `tshark`, Zeek, and Suricata availability if local PCAP parsing is required.
+- Confirm Zeek and `tshark` availability if local PCAP parsing is required. Suricata is not required.
 - Docker may or may not be installed; treat it as optional unless the organizer image requires it.
 
 ## Package installation
@@ -14,13 +14,13 @@ openEuler environments may use `dnf` or `yum` instead of `apt`. Deployment scrip
 Use the platform package manager provided by the environment:
 
 ```bash
-dnf install python3 python3-pip wireshark-cli zeek suricata
+dnf install python3 python3-pip wireshark-cli zeek
 ```
 
 or:
 
 ```bash
-yum install python3 python3-pip wireshark-cli zeek suricata
+yum install python3 python3-pip wireshark-cli zeek
 ```
 
 Exact package names can differ by mirror and organizer image. Record final commands in the deployment log rather than hard-coding them into the main pipeline.
@@ -33,4 +33,4 @@ The offline pipeline does not call a model. If an online/local model service is 
 http://127.0.0.1:8000/v1
 ```
 
-Store `LLM_BASE_URL`, `LLM_MODEL_NAME`, and `LLM_API_KEY` only in environment variables.
+Store `BASE_URL`, `MODEL`, and `API_KEY` (or their `LLM_*` aliases) only in environment variables.

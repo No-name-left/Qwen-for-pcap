@@ -28,4 +28,4 @@ Do not high-confidence label attacks from checksum or unknown-code alerts alone.
 
 ## Relevant event card fields
 
-Low-confidence anomaly handling should inspect `suricata_alerts.signature`, `suricata_alerts.category`, `suricata_alerts.severity`, and `suricata_features.top_alert_signatures`. Invalid checksum, unknown code, ICMPv6, and UDPv6 alerts should not by themselves override otherwise empty `tshark_features` or low `zeek_features.conn_count`. Stronger judgment requires accompanying exploit, C2, malware, or flood evidence.
+Low-confidence anomaly handling should inspect Zeek `weird.log`, connection history/state, tshark protocol fields, flags, and packet counts. Invalid checksum, unknown code, ICMPv6, and UDPv6 anomalies should not by themselves override otherwise empty application summaries or low connection counts. Stronger judgment requires accompanying exploit, callback, malware, or flood evidence.

@@ -15,12 +15,13 @@ Legacy labels such as `normal`, `port_scan`, `exploit`, `backdoor`, `trojan_call
 
 ```text
 PCAP
--> tshark / Zeek / Suricata parsing
+-> Zeek / tshark fallback parsing
 -> sessionization / session card
 -> deterministic RAG query builder
 -> RAG retriever
 -> session card + retrieved knowledge
--> Qwen3.5-27B stage / technique code prediction
+-> Qwen3.5 technique_code prediction
+-> deterministic stage_code mapping
 -> competition CSV submission
 -> human-readable analysis report
 ```
@@ -53,7 +54,7 @@ The RAG library should cover:
 
 - official label boundaries for stage and technique codes;
 - attack stages and attack techniques;
-- tshark, Zeek, and Suricata field interpretation;
+- tshark and Zeek field interpretation;
 - protocol behavior for TCP, UDP, DNS, HTTP, TLS/SNI, SMB, ICMP/ICMPv6, SSH/FTP/RDP, and common ports;
 - signature-family explanations for scanning, brute force, exploitation, backdoor access, malware callback, C2, and protocol anomalies;
 - false-positive boundaries for weak evidence, normal browsing/business access, normal SMB/DNS/HTTP, periodic traffic, high-volume normal traffic, and low-confidence alerts;
@@ -80,7 +81,7 @@ deterministic query from session card
 + top-k snippets
 ```
 
-Exact signature names, protocol names, port numbers, Zeek fields, Suricata categories, and tshark fields should remain strong keyword signals. Vector or hybrid retrieval may be added later, but it is optional and not a current dependency.
+Exact protocol names, port numbers, Zeek fields, behavior indicators, and tshark fields should remain strong keyword signals. Vector or hybrid retrieval may be added later, but it is optional and not a current dependency.
 
 ## Main Reference Sources
 

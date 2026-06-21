@@ -98,9 +98,9 @@ Ignored local outputs retained but not committed:
 Mainline:
 
 - Zeek-first PCAP parsing and session records.
-- Suricata evidence and tshark fallback support.
+- Zeek primary parsing with tshark packet-level assistance and fallback; Suricata is not part of the runtime.
 - scan_group handling for portscan.
-- official-code RAG, official technique prediction, deterministic stage fallback, CSV export.
+- official-code RAG, official technique prediction, deterministic stage mapping, CSV export.
 
 Historical experiments:
 

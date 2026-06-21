@@ -12,15 +12,15 @@ safe_for_llm: true
 
 ## Evidence
 
-LLM output should use the closed attack_type and attack_stage vocabularies, include confidence from 0 to 1, and cite concrete evidence fields.
+LLM output should use the closed eight-value `technique_code` vocabulary, include confidence from 0 to 1, and cite concrete evidence fields. It must not predict `stage_code`.
 
 ## Judgment
 
-Evidence must mention fields such as suricata_alert_count, signature, unique_dst_ports, failed_conn_rate, DNS queries, HTTP URIs, or TLS SNI when relevant.
+Evidence should mention fields such as Zeek connection state/history, unique destination ports, failed-connection rate, packet/byte counts, DNS queries, HTTP URIs, or TLS SNI when relevant.
 
 ## Stage mapping
 
-Schema validity is separate from correctness; a valid JSON object may still be a poor judgment if evidence is weak.
+The exporter derives `stage_code` deterministically from `technique_code`. Schema validity is separate from correctness; a valid JSON object may still be a poor judgment if evidence is weak.
 
 ## Boundaries
 

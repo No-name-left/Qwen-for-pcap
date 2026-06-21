@@ -28,7 +28,7 @@ Event-level normal results do not erase separate high-confidence attack events.
 
 ## Relevant event card fields
 
-For event-level judgment, use only the fields present in the current event card: `candidate_labels`, `source_presence`, `tshark_features`, `zeek_features`, `suricata_alerts`, and `suricata_features`. For PCAP-level aggregation, preserve each event's strongest evidence instead of replacing it with a majority vote from many low-signal events.
+For session-level judgment, use only fields present in the current record: Zeek connection/application summaries, tshark packet/stream features, and within-PCAP behavior statistics. Preserve each record's strongest evidence instead of replacing it with a majority vote from many low-signal records.
 
 ## Source grounding
 

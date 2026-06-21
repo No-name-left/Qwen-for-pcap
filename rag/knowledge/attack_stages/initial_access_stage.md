@@ -28,4 +28,4 @@ Do not use initial_access just because a service was contacted; require attack i
 
 ## Source grounding
 
-Grounded by MITRE ATT&CK Initial Access tactic pages, Microsoft MS17-010, Suricata exploit categories, and protocol evidence. Exploit signatures, SMB exploit indicators, web exploit strings, and brute-force login attempts are the main event-card evidence for `initial_access`.
+Grounded by MITRE ATT&CK Initial Access tactic pages, Microsoft MS17-010, and protocol evidence. SMB exploit indicators, web exploit strings, and repeated brute-force login attempts are the main session evidence for `initial_access`.

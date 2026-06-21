@@ -13,6 +13,13 @@ from qwen35_rag_utils import ROOT
 
 STAGE_CODES = {"TA43", "TA01", "TA03", "TA11", "TN01"}
 TECHNIQUE_CODES = {"TA43_01", "TA43_02", "TA01_01", "TA01_02", "TA03_01", "TA11_01", "TA11_02", "TN01_01"}
+TECHNIQUE_TO_STAGE = {
+    "TA43_01": "TA43", "TA43_02": "TA43",
+    "TA01_01": "TA01", "TA01_02": "TA01",
+    "TA03_01": "TA03",
+    "TA11_01": "TA11", "TA11_02": "TA11",
+    "TN01_01": "TN01",
+}
 
 
 def load_json(path: Path, default: Any) -> Any:
@@ -101,12 +108,12 @@ def main() -> int:
         base / "results_technique_rag_scan_group",
         base / "rerun_technique_rag",
     ]
-    stage_dirs = [
-        base / "results_stage_rag",
-        base / "rerun_stage_rag",
-    ]
     technique_results, _ = read_result_dirs(technique_dirs)
-    stage_results, _ = read_result_dirs(stage_dirs)
+    stage_results = {
+        rid: {**item, "predicted_code": TECHNIQUE_TO_STAGE[item["predicted_code"]], "source": "stage_from_technique"}
+        for rid, item in technique_results.items()
+        if item.get("predicted_code") in TECHNIQUE_TO_STAGE
+    }
 
     technique_missing = [rid for rid in selected_ids if rid not in technique_results]
     stage_missing = [rid for rid in selected_ids if rid not in stage_results]
@@ -125,11 +132,11 @@ def main() -> int:
     stage_failure_records = []
     for rid in stage_missing:
         if rid == "ctu13_scenario1::session::000002":
-            category = "timeout"
-            detail = "Stage batch 002 recorded `Request timed out.` after the scan_group stage result succeeded."
+            category = "missing technique result"
+            detail = "Stage could not be derived because the corresponding technique result is missing."
         else:
-            category = "interrupted by script logic"
-            detail = "Stage run was terminated after the timeout/time budget; no result was persisted for this selected record."
+            category = "missing or invalid technique result"
+            detail = "Stage is derived deterministically and is unavailable without a valid technique result."
         stage_failure_records.append({"record_id": rid, "failure_category": category, "detail": detail})
 
     write_json(base / "failed_technique_records.json", technique_failure_records)
@@ -174,12 +181,11 @@ def main() -> int:
             "",
             "## Stage Failures",
             "",
-            "- Stage did not fail because of a technique stop condition. The persisted summary shows scan_group stage success, then `ctu13_scenario1::session::000002` timed out.",
-            "- The remaining stage records were not completed because the run was stopped to keep the test bounded.",
+            "- No stage model is called. Missing stage rows correspond to missing or invalid technique results.",
             "",
             "## Recommendation",
             "",
-            "- Rerun only the failed technique records and missing stage records when `RUN_API=1` and all LLM environment variables are set.",
+            "- Rerun only failed technique records; stage codes are derived after technique results are complete.",
             "- No prompt change is indicated by the previous results; successful outputs were valid JSON with legal codes.",
             "- Runner changes are useful: failed record export, record-id filtering, retry-once, continue-on-error, and immediate stop on 401/402.",
         ],
@@ -192,7 +198,7 @@ def main() -> int:
             "",
             "- Do not add selected records.",
             f"- Technique rerun records: {len(technique_failure_records)}",
-            f"- Stage rerun records: {min(len(stage_failure_records), 10)}",
+            "- Stage rerun records: 0 (stage is deterministic).",
             "- Keep temperature 0, max tokens 512, and sleep between calls.",
             "- Stop immediately on 401 or 402.",
             "",
@@ -209,20 +215,6 @@ def main() -> int:
             "  --max-files 3 --temperature 0 --max-tokens 512 --sleep-seconds 2 \\",
             "  --retry-failed-once --continue-on-error --require-run-api-flag",
             "```",
-            "",
-            "## Stage command",
-            "",
-            "```bash",
-            "RUN_API=1 python3 scripts/run_qwen_openai_compatible.py \\",
-            "  --prompt-dir outputs/api_tests/mixed_small/prompts_stage_rag_scan_group_first \\",
-            "  --output-dir outputs/api_tests/mixed_small/rerun_stage_rag \\",
-            "  --result-name results.json \\",
-            "  --summary-name summary.md \\",
-            "  --only-record-ids outputs/api_tests/mixed_small/failed_stage_records.json \\",
-            "  --failed-records-out outputs/api_tests/mixed_small/rerun_stage_rag/failed_records.json \\",
-            "  --max-files 10 --temperature 0 --max-tokens 512 --sleep-seconds 2 \\",
-            "  --retry-failed-once --continue-on-error --require-run-api-flag",
-            "```",
         ],
     )
 
@@ -230,7 +222,7 @@ def main() -> int:
     technique_clean = [{k: v for k, v in technique_results[rid].items() if not k.startswith("_")} for rid in selected_ids if rid in technique_results]
     stage_clean = [{k: v for k, v in stage_results[rid].items() if not k.startswith("_")} for rid in selected_ids if rid in stage_results]
     write_json(merged_dir / "technique_rag_results.json", technique_clean)
-    write_json(merged_dir / "stage_rag_results.json", stage_clean)
+    write_json(merged_dir / "stage_from_technique_results.json", stage_clean)
 
     scan_group = technique_results.get("feasibility_portscan::scan_group::000001")
     technique_complete = len(technique_missing) == 0 and not technique_invalid

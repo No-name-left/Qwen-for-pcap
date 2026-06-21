@@ -12,7 +12,7 @@ safe_for_llm: true
 
 ## Evidence
 
-Low-signal events have very small packet_count or conn_count, no Suricata alerts, no meaningful DNS/HTTP/TLS samples, and no suspicious connection pattern.
+Low-signal events have very small packet or connection counts, no meaningful DNS/HTTP/TLS samples, low byte volume, and no suspicious repeated connection pattern.
 
 ## Judgment
 

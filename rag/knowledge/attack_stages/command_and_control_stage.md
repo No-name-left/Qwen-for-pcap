@@ -28,4 +28,4 @@ Scheduled software updates and normal telemetry can look periodic. Require suspi
 
 ## Source grounding
 
-Grounded by MITRE ATT&CK Command and Control tactic pages, Suricata C2/malware categories, STRRAT public references, and local rule metadata for CnC/checkin behavior. Malware checkins, callbacks, suspicious DNS/HTTP/TLS destinations, and beacon-like sessions support `command_and_control`.
+Grounded by MITRE ATT&CK Command and Control tactic pages and STRRAT public references. Repeated malware check-ins, callbacks, suspicious DNS/HTTP/TLS behavior, and beacon-like sessions support `command_and_control`.

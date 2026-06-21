@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
-DRY_RUN=true
+DRY_RUN=false
 ARGS=()
 while [ "$#" -gt 0 ]; do
   case "$1" in

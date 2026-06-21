@@ -115,8 +115,9 @@ legacy_semantic_label_mapping:
     note: Do not submit this label. Reclassify into an official code or fall back by evidence policy.
 
 fallback_rules:
-  invalid_stage_code: TN01
-  invalid_technique_code: TN01_01
+  invalid_stage_code: derive_from_technique_only
+  invalid_technique_code: error
+  missing_technique_code: error
   weak_or_ambiguous_evidence: TN01_01
   missing_required_session_fields: manual_review
   require_warning_in_audit_report: true

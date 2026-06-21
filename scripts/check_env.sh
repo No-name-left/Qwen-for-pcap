@@ -56,9 +56,9 @@ llm_base_url_set=false
 llm_model_name_set=false
 llm_api_key_set=false
 hf_token_set=false
-if [ -n "${LLM_BASE_URL:-}" ]; then llm_base_url_set=true; fi
-if [ -n "${LLM_MODEL_NAME:-}" ]; then llm_model_name_set=true; fi
-if [ -n "${LLM_API_KEY:-}" ]; then llm_api_key_set=true; fi
+if [ -n "${BASE_URL:-${LLM_BASE_URL:-}}" ]; then llm_base_url_set=true; fi
+if [ -n "${MODEL:-${LLM_MODEL_NAME:-}}" ]; then llm_model_name_set=true; fi
+if [ -n "${API_KEY:-${LLM_API_KEY:-}}" ]; then llm_api_key_set=true; fi
 if [ -n "${HF_TOKEN:-}" ] || [ -n "${HUGGINGFACEHUB_API_TOKEN:-}" ]; then hf_token_set=true; fi
 
 {
@@ -76,16 +76,15 @@ if [ -n "${HF_TOKEN:-}" ] || [ -n "${HUGGINGFACEHUB_API_TOKEN:-}" ]; then hf_tok
   echo "| pip | $pip_status | $pip_version |"
   echo "| tshark | $(status_for_cmd tshark) | $(version_for_cmd tshark --version) |"
   echo "| Zeek | $(status_for_cmd zeek) | $(version_for_cmd zeek --version) |"
-  echo "| Suricata | $(status_for_cmd suricata) | $(version_for_cmd suricata --build-info) |"
   echo "| Docker | $(status_for_cmd docker) | optional; $(version_for_cmd docker --version) |"
   echo
   echo "## LLM environment variables"
   echo
   echo "| Variable | Configured | Value printed |"
   echo "| --- | --- | --- |"
-  echo "| LLM_BASE_URL | $llm_base_url_set | no |"
-  echo "| LLM_MODEL_NAME | $llm_model_name_set | no |"
-  echo "| LLM_API_KEY | $llm_api_key_set | no |"
+  echo "| BASE_URL / LLM_BASE_URL | $llm_base_url_set | no |"
+  echo "| MODEL / LLM_MODEL_NAME | $llm_model_name_set | no |"
+  echo "| API_KEY / LLM_API_KEY | $llm_api_key_set | no |"
   echo "| HF_TOKEN / HUGGINGFACEHUB_API_TOKEN | $hf_token_set | no |"
   echo
   echo "No OpenAI-compatible, Hugging Face, or other online model endpoint was called."

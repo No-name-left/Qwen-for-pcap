@@ -10,12 +10,12 @@
 
 ```text
 PCAP
--> tshark / Zeek / Suricata 解析
+-> Zeek / tshark fallback 解析
 -> sessionization / session card
 -> deterministic RAG query builder
 -> RAG retriever
--> Qwen3.5-27B session-level classification
--> stage / technique code prediction
+-> Qwen3.5 session-level technique classification
+-> deterministic technique_code to stage_code mapping
 -> competition CSV submission
 -> human-readable analysis report
 ```
@@ -26,11 +26,12 @@ PCAP
 
 ## 3. 解析工具
 
-当前推荐使用三类离线解析工具：
+当前推荐使用两类离线解析工具：
 
 - `tshark`: 提取 packet-level 字段、`tcp.stream`、协议、端口、时间、flags、长度等信息。
 - `Zeek`: 使用 `conn.log`、`dns.log`、`http.log`、`ssl.log`、`notice.log`、`weird.log` 等结构化日志，重点关注 `conn.uid`。
-- `Suricata`: 使用 EVE JSON / alert / flow / dns / http / tls 等输出辅助识别签名命中和异常行为。
+
+Zeek 是主解析器；tshark 提供 packet-level 辅助，并在 `conn.log` 不可用时作为 fallback。Suricata 不属于当前主线。
 
 ## 4. 分析单位
 
@@ -108,17 +109,13 @@ PCAP
 
 ## 10. 当前主线模型
 
-当前主线模型是 Qwen3.5-27B。配置通过环境变量读取：
+当前模型只预测官方八类 `technique_code`；`stage_code` 始终由程序确定性映射。API 配置通过以下环境变量读取：
 
-- `LLM_BASE_URL`
-- `LLM_API_KEY`
-- `LLM_MODEL_NAME`
+- `BASE_URL` 或 `LLM_BASE_URL`
+- `API_KEY` 或 `LLM_API_KEY`
+- `MODEL` 或 `LLM_MODEL_NAME`
 
-Hugging Face Router 可用配置示例：
-
-- `LLM_BASE_URL=https://router.huggingface.co/v1`
-- `LLM_MODEL_NAME=Qwen/Qwen3.5-27B:novita`
-- fallback: `Qwen/Qwen3.5-27B`
+本地 vLLM 示例：`BASE_URL=http://127.0.0.1:8000/v1`、`MODEL=qwen3.5`、`API_KEY=EMPTY`。
 
 不要在配置、prompt、报告或代码中写入真实 token。
 
@@ -129,7 +126,7 @@ RAG 的作用是为 session-level 判断提供辅助知识：
 - 官方标签边界；
 - 攻击阶段和攻击技术解释；
 - 协议、端口、工具字段解释；
-- tshark / Zeek / Suricata 字段和签名解释；
+- tshark / Zeek 字段、协议和行为解释；
 - 常见误报边界；
 - event/session 到 CSV 输出的辅助判断规则。
 

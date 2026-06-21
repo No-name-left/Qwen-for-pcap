@@ -10,16 +10,16 @@
 The mainline is a Zeek-first PCAP/session-level classifier:
 
 ```text
-PCAP -> Zeek/Suricata/tshark fallback -> session cards / scan_group
--> RAG retrieval -> Qwen3.5-27B or OpenAI-compatible endpoint
--> official technique code -> deterministic stage fallback -> CSV
+PCAP -> Zeek/tshark fallback -> session cards / scan_group
+-> RAG retrieval -> Qwen3.5 or OpenAI-compatible endpoint
+-> official technique code -> deterministic stage mapping -> CSV
 ```
 
 Zeek is the primary parser. tshark is a fallback only when Zeek or `conn.log` is unavailable.
 
 ## Completed
 
-- Zeek and Suricata tool checks.
+- Zeek and tshark tool checks. Historical Suricata checks are archived and are not part of the current runtime.
 - Zeek rebuild with 31,920 session cards and 31,740 classification records.
 - scan_group handling for portscan.
 - official 8-code RAG docs and 5 key boundary docs.

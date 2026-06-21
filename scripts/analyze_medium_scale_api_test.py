@@ -147,14 +147,17 @@ def main() -> int:
     reference = load_json(base / "public_reference_labels.json", {})
 
     technique_dir = base / "results_technique_rag"
-    stage_dir = base / "results_stage_rag"
     technique_results = load_results(technique_dir)
-    stage_results = load_results(stage_dir)
+    stage_results = {
+        rid: {**item, "predicted_code": TECHNIQUE_TO_STAGE[item["predicted_code"]], "source": "stage_from_technique"}
+        for rid, item in technique_results.items()
+        if item.get("predicted_code") in TECHNIQUE_TO_STAGE
+    }
     technique_stats = load_stats(technique_dir)
-    stage_stats = load_stats(stage_dir)
+    stage_stats: dict[str, Any] = {}
     api_ready = os.environ.get("RUN_API") == "1" and all(os.environ.get(name) for name in ["LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL_NAME"])
     technique_api_calls = int(technique_stats.get("api_calls_attempted", 0) or 0)
-    stage_api_calls = int(stage_stats.get("api_calls_attempted", 0) or 0)
+    stage_api_calls = 0
     technique_success = len([rid for rid in selected_ids if rid in technique_results])
     stage_success = len([rid for rid in selected_ids if rid in stage_results])
     technique_missing = len(selected_ids) - technique_success
@@ -165,7 +168,7 @@ def main() -> int:
     stage_dist = distribution(stage_results, STAGE_CODES)
     scan_group_code = technique_results.get("feasibility_portscan::scan_group::000001", {}).get("predicted_code")
     technique_success_rate = technique_success / len(selected_ids) if selected_ids else 0
-    recommend_stage = technique_success_rate >= 0.70 and technique_invalid == 0
+    stage_derived_ready = technique_success_rate >= 0.70 and technique_invalid == 0
 
     technique_report = {
         "api_ready": api_ready,
@@ -181,7 +184,7 @@ def main() -> int:
         "invalid_code_count": technique_invalid,
         "portscan_scan_group_is_TA43_01": scan_group_code == "TA43_01",
         "distribution": technique_dist,
-        "recommend_stage_rag": recommend_stage,
+        "stage_derived_ready": stage_derived_ready,
     }
     write_json(base / "technique_rag_run_report.json", technique_report)
     write_text(
@@ -200,11 +203,12 @@ def main() -> int:
             f"- Illegal technique code count: {technique_invalid}",
             f"- Portscan scan_group predicted `TA43_01`: {str(scan_group_code == 'TA43_01').lower()}",
             f"- Output distribution: `{json.dumps(technique_dist, sort_keys=True)}`",
-            f"- Recommend running stage_rag: {str(recommend_stage).lower()}",
+            f"- Deterministic stage mapping ready: {str(stage_derived_ready).lower()}",
         ],
     )
 
     stage_report = {
+        "source": "deterministic_technique_to_stage_mapping",
         "api_ready": api_ready,
         "api_calls_attempted": stage_api_calls,
         "selected_records": len(selected_ids),
@@ -218,14 +222,14 @@ def main() -> int:
         "invalid_code_count": stage_invalid,
         "distribution": stage_dist,
     }
-    write_json(base / "stage_rag_run_report.json", stage_report)
+    write_json(base / "stage_from_technique_run_report.json", stage_report)
     write_text(
-        base / "stage_rag_run_report.md",
+        base / "stage_from_technique_run_report.md",
         [
-            "# Medium-scale stage_rag run report",
+            "# Medium-scale deterministic stage mapping report",
             "",
             f"- API ready in current environment: {str(api_ready).lower()}",
-            f"- Actual API calls attempted: {stage_api_calls}",
+            "- Actual stage API calls attempted: 0",
             f"- Selected records: {len(selected_ids)}",
             f"- Success: {stage_success}",
             f"- Failed or missing: {stage_missing}",
@@ -272,16 +276,12 @@ def main() -> int:
         record = selected_by_id[rid]
         technique_rows.append({"pcap_id": record.get("pcap_id"), "session_id": record.get("session_id") or rid, "technique_code": item.get("predicted_code")})
     stage_rows = []
-    stage_source = "stage_rag"
+    stage_source = "stage_from_technique"
     stage_source_map = {item["record_id"]: item for item in stage_from_technique}
     for rid in selected_ids:
-        item = stage_results.get(rid)
+        item = stage_source_map.get(rid)
         code = item.get("predicted_code") if item else None
-        source = "stage_rag"
-        if code not in STAGE_CODES:
-            item = stage_source_map.get(rid)
-            code = item.get("predicted_code") if item else None
-            source = "stage_from_technique"
+        source = "stage_from_technique"
         if code not in STAGE_CODES:
             continue
         record = selected_by_id[rid]

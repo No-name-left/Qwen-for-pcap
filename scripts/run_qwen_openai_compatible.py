@@ -12,11 +12,18 @@ from urllib.parse import urlparse
 import yaml
 from openai import OpenAI
 
-from qwen35_rag_utils import ROOT, parse_json_array, strip_markdown_fence, validate_llm_results
+from qwen35_rag_utils import ROOT, strip_markdown_fence
 
 
-STAGE_CODES = {"TA43", "TA01", "TA03", "TA11", "TN01"}
 TECHNIQUE_CODES = {"TA43_01", "TA43_02", "TA01_01", "TA01_02", "TA03_01", "TA11_01", "TA11_02", "TN01_01"}
+
+
+class ModelOutputParseError(ValueError):
+    pass
+
+
+class ModelResultValidationError(ValueError):
+    pass
 
 
 def load_config(path: Path) -> dict:
@@ -62,7 +69,8 @@ def env_from_config(cfg: dict, section: str, key: str):
 
 def api_key_from_env(cfg: dict):
     return (
-        os.environ.get("LLM_API_KEY")
+        os.environ.get("API_KEY")
+        or os.environ.get("LLM_API_KEY")
         or env_from_config(cfg, "provider", "api_key_env")
         or os.environ.get("HF_TOKEN")
         or os.environ.get("HUGGINGFACEHUB_API_TOKEN")
@@ -70,24 +78,59 @@ def api_key_from_env(cfg: dict):
 
 
 def parse_json_objects(text: str) -> list[dict[str, Any]]:
-    cleaned = strip_markdown_fence(text)
+    cleaned = text.strip()
+    if "</think>" in cleaned:
+        cleaned = cleaned.rsplit("</think>", 1)[1].strip()
+    cleaned = strip_markdown_fence(cleaned)
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError:
-        try:
-            parsed = parse_json_array(cleaned)
-        except Exception:
-            start_obj = cleaned.find("{")
-            end_obj = cleaned.rfind("}")
-            if start_obj >= 0 and end_obj > start_obj:
-                parsed = json.loads(cleaned[start_obj : end_obj + 1])
-            else:
-                raise
+        parsed = None
+        decoder = json.JSONDecoder()
+        for idx, char in enumerate(cleaned):
+            if char not in "[{":
+                continue
+            try:
+                candidate, _ = decoder.raw_decode(cleaned[idx:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict) or (
+                isinstance(candidate, list) and all(isinstance(item, dict) for item in candidate)
+            ):
+                parsed = candidate
+                break
+        if parsed is None:
+            raise ModelOutputParseError("no JSON object or object array found in model output")
     if isinstance(parsed, dict):
         return [parsed]
     if isinstance(parsed, list) and all(isinstance(item, dict) for item in parsed):
         return parsed
-    raise ValueError("model output is JSON but not an object or object array")
+    raise ModelOutputParseError("model output is JSON but not an object or object array")
+
+
+def validate_technique_results(results: list[dict[str, Any]], expected_record_id: str) -> list[dict[str, Any]]:
+    if len(results) != 1:
+        raise ModelResultValidationError(f"expected exactly one result object, got {len(results)}")
+    item = dict(results[0])
+    record_id = item.get("record_id")
+    if not isinstance(record_id, str) or not record_id.strip():
+        raise ModelResultValidationError("record_id is required and must be a non-empty string")
+    if record_id != expected_record_id:
+        raise ModelResultValidationError(f"record_id mismatch: expected `{expected_record_id}`, got `{record_id}`")
+    code = item.get("predicted_code") or item.get("technique_code")
+    if code not in TECHNIQUE_CODES:
+        raise ModelResultValidationError(f"invalid technique code `{code}`")
+    confidence = item.get("confidence")
+    if confidence is not None and (
+        not isinstance(confidence, (int, float)) or isinstance(confidence, bool) or not 0 <= confidence <= 1
+    ):
+        raise ModelResultValidationError(f"invalid confidence `{confidence}`")
+    reason = item.get("reason")
+    if reason is not None and not isinstance(reason, str):
+        raise ModelResultValidationError("reason must be a string when present")
+    item["predicted_code"] = code
+    item.pop("technique_code", None)
+    return [item]
 
 
 def extract_record_id_from_prompt(prompt_text: str, fallback: str) -> str:
@@ -152,15 +195,6 @@ def load_existing_parsed_results(parsed_dir: Path, result_path: Path) -> dict[st
     return existing
 
 
-def code_set_for_name(name: str) -> set[str] | None:
-    low = name.lower()
-    if "technique" in low:
-        return TECHNIQUE_CODES
-    if "stage" in low:
-        return STAGE_CODES
-    return None
-
-
 def error_code(error: str) -> str | None:
     for code in ("401", "402", "403", "408", "429", "500", "502", "503", "504"):
         if code in error:
@@ -178,8 +212,10 @@ def classify_error(error: str, exc_type: str = "") -> str:
         return "429 rate limit"
     if "timed out" in low or "timeout" in low:
         return "timeout"
-    if "jsondecodeerror" in low or "model output is json but not" in low:
+    if "modeloutputparseerror" in low or "jsondecodeerror" in low or "no json object" in low:
         return "JSON parse failure"
+    if "modelresultvalidationerror" in low or "invalid technique code" in low or "record_id mismatch" in low:
+        return "result validation failure"
     if "empty" in low:
         return "empty response"
     if any(code in low for code in ("500", "502", "503", "504")):
@@ -190,6 +226,26 @@ def classify_error(error: str, exc_type: str = "") -> str:
 def safe_host(base_url: str) -> str:
     parsed = urlparse(base_url)
     return parsed.netloc or base_url.split("/")[0]
+
+
+def display_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
+def parse_bool(value: str | bool | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"invalid boolean value: {value}")
 
 
 def main() -> int:
@@ -205,6 +261,8 @@ def main() -> int:
     parser.add_argument("--max-tokens", type=int)
     parser.add_argument("--timeout-seconds", type=float)
     parser.add_argument("--sleep-seconds", type=float, default=0.0)
+    parser.add_argument("--enable-thinking", choices=["true", "false"], help="Qwen chat-template thinking mode; default false.")
+    parser.add_argument("--disable-extra-body", action="store_true", help="Do not send chat_template_kwargs (for providers that reject extra_body).")
     parser.add_argument("--require-run-api-flag", action="store_true")
     parser.add_argument("--retry-failed-once", action="store_true")
     parser.add_argument("--continue-on-error", action="store_true")
@@ -215,24 +273,31 @@ def main() -> int:
     load_env_file(ROOT / ".env")
     cfg = load_config(args.config)
     generation = cfg.get("generation", {}) if isinstance(cfg.get("generation"), dict) else {}
-    recommended = cfg.get("recommended_environment", {}) if isinstance(cfg.get("recommended_environment"), dict) else {}
     base_url = (
-        os.environ.get("LLM_BASE_URL")
+        os.environ.get("BASE_URL")
+        or os.environ.get("LLM_BASE_URL")
         or env_from_config(cfg, "provider", "base_url_env")
         or cfg_value(cfg, "base_url")
-        or recommended.get("huggingface_router_base_url")
     )
     api_key = api_key_from_env(cfg)
     model = (
-        os.environ.get("LLM_MODEL_NAME")
+        os.environ.get("MODEL")
+        or os.environ.get("LLM_MODEL_NAME")
         or env_from_config(cfg, "provider", "model_name_env")
         or cfg_value(cfg, "model_name")
-        or recommended.get("huggingface_router_model_name")
-        or recommended.get("fallback_model_name")
     )
     temperature = args.temperature if args.temperature is not None else float(os.environ.get("LLM_TEMPERATURE", generation.get("temperature", cfg.get("temperature", 0.1))))
     max_tokens = args.max_tokens if args.max_tokens is not None else int(os.environ.get("LLM_MAX_TOKENS", generation.get("max_tokens", cfg.get("max_tokens", 8192))))
     top_p = float(os.environ.get("LLM_TOP_P", generation.get("top_p", cfg.get("top_p", 0.8))))
+    enable_thinking = parse_bool(
+        args.enable_thinking
+        if args.enable_thinking is not None
+        else os.environ.get("ENABLE_THINKING", os.environ.get("LLM_ENABLE_THINKING")),
+        default=parse_bool(generation.get("enable_thinking"), default=False),
+    )
+    send_extra_body = not args.disable_extra_body and parse_bool(
+        os.environ.get("LLM_SEND_EXTRA_BODY"), default=bool(generation.get("send_extra_body", True))
+    )
     if args.require_run_api_flag and os.environ.get("RUN_API") != "1":
         args.output_dir.mkdir(parents=True, exist_ok=True)
         (args.output_dir / args.summary_name).write_text(
@@ -248,13 +313,13 @@ def main() -> int:
             "# Qwen3.5-27B run summary\n\n"
             "Status: not_started\n\n"
             "Missing API configuration. Set:\n\n"
-            "- `LLM_API_KEY` or `HF_TOKEN`\n"
-            "- optional: `LLM_BASE_URL`\n"
-            "- optional: `LLM_MODEL_NAME`\n\n"
+            "- `API_KEY` or `LLM_API_KEY`\n"
+            "- `BASE_URL` or `LLM_BASE_URL`\n"
+            "- `MODEL` or `LLM_MODEL_NAME`\n\n"
             "No model call was made and no result was fabricated.\n",
             encoding="utf-8",
         )
-        print("missing API key; set LLM_API_KEY or HF_TOKEN; no call made")
+        print("missing API configuration; set BASE_URL/MODEL/API_KEY (or LLM_* aliases); no call made")
         return 2
     if args.retry_failed_once:
         args.retries = max(args.retries, 1)
@@ -279,25 +344,36 @@ def main() -> int:
     parsed_dir = args.output_dir / "parsed"
     raw_dir.mkdir(parents=True, exist_ok=True)
     parsed_dir.mkdir(parents=True, exist_ok=True)
-    allowed_codes = code_set_for_name(args.prompt_dir.name) or code_set_for_name(args.output_dir.name)
     result_path = args.output_dir / args.result_name
-    existing_results = load_existing_parsed_results(parsed_dir, result_path) if args.resume else {}
+    existing_results: dict[str, dict[str, Any]] = {}
+    if args.resume:
+        loaded_existing = load_existing_parsed_results(parsed_dir, result_path)
+        prompt_record_ids = {record_id for _, record_id, _ in prompts}
+        for record_id, item in loaded_existing.items():
+            if record_id not in prompt_record_ids:
+                continue
+            try:
+                existing_results[record_id] = validate_technique_results([item], record_id)[0]
+            except ModelResultValidationError:
+                continue
     all_results = list(existing_results.values())
     rows = []
     json_parse_failures = 0
     invalid_code_count = 0
+    validation_failure_count = 0
     error_counts: dict[str, int] = {}
     failed_records: list[dict[str, Any]] = []
     stop_after_batch = False
     api_calls_attempted = 0
     for idx, (prompt_path, record_id, prompt_text) in enumerate(prompts, start=1):
         raw_path = raw_dir / f"raw_batch_{idx:03d}.txt"
+        error_path = raw_dir / f"error_batch_{idx:03d}.txt"
         parsed_path = parsed_dir / f"parsed_batch_{idx:03d}.json"
         if args.resume and record_id in existing_results:
             rows.append({
                 "batch": idx,
                 "record_id": record_id,
-                "prompt": str(prompt_path.resolve().relative_to(ROOT)),
+                "prompt": display_path(prompt_path),
                 "status": "skipped_existing",
                 "error": "",
                 "error_category": "",
@@ -313,21 +389,27 @@ def main() -> int:
         for attempt in range(args.retries + 1):
             try:
                 api_calls_attempted += 1
+                request_kwargs: dict[str, Any] = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt_text}],
+                    "temperature": temperature,
+                    "top_p": top_p,
+                    "max_tokens": max_tokens,
+                    "stream": False,
+                }
+                if send_extra_body:
+                    request_kwargs["extra_body"] = {
+                        "chat_template_kwargs": {"enable_thinking": enable_thinking}
+                    }
                 response = client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt_text}],
-                    temperature=temperature,
-                    top_p=top_p,
-                    max_tokens=max_tokens,
-                    stream=False,
+                    **request_kwargs,
                 )
                 content = response.choices[0].message.content or ""
                 raw_path.write_text(content, encoding="utf-8")
+                (raw_dir / f"raw_batch_{idx:03d}_attempt_{attempt + 1:02d}.txt").write_text(content, encoding="utf-8")
                 parsed = parse_json_objects(content)
+                parsed = validate_technique_results(parsed, record_id)
                 parsed_path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-                if allowed_codes:
-                    invalid_codes_for_batch = sum(1 for item in parsed if item.get("predicted_code") not in allowed_codes)
-                    invalid_code_count += invalid_codes_for_batch
                 all_results.extend(parsed)
                 records = len(parsed)
                 status = "success"
@@ -335,16 +417,21 @@ def main() -> int:
             except Exception as exc:
                 error = str(exc)
                 category = classify_error(error, type(exc).__name__)
-                raw_path.write_text(f"ERROR: {type(exc).__name__}: {error}\n", encoding="utf-8")
+                error_path.write_text(f"ERROR: {type(exc).__name__}: {error}\n", encoding="utf-8")
                 if attempt == args.retries:
-                    if type(exc).__name__ in {"JSONDecodeError", "ValueError"}:
+                    if isinstance(exc, (json.JSONDecodeError, ModelOutputParseError)):
                         json_parse_failures += 1
+                    if isinstance(exc, ModelResultValidationError) and "invalid technique code" in error:
+                        invalid_codes_for_batch = 1
+                        invalid_code_count += 1
+                    if isinstance(exc, ModelResultValidationError):
+                        validation_failure_count += 1
                     code = error_code(error)
                     if code:
                         error_counts[code] = error_counts.get(code, 0) + 1
                     failed_records.append({
                         "record_id": record_id,
-                        "prompt": str(prompt_path.resolve().relative_to(ROOT)),
+                        "prompt": display_path(prompt_path),
                         "batch": idx,
                         "error_category": category,
                         "error": error,
@@ -355,7 +442,7 @@ def main() -> int:
         rows.append({
             "batch": idx,
             "record_id": record_id,
-            "prompt": str(prompt_path.resolve().relative_to(ROOT)),
+            "prompt": display_path(prompt_path),
             "status": status,
             "error": error,
             "error_category": classify_error(error) if error else "",
@@ -369,6 +456,8 @@ def main() -> int:
             f"- Model: `{model}`",
             f"- Base URL host: `{safe_host(base_url)}`",
             f"- Request timeout seconds: {request_timeout}",
+            f"- Enable thinking: {str(enable_thinking).lower()}",
+            f"- Extra body sent: {str(send_extra_body).lower()}",
             f"- Max files: {args.max_files if args.max_files is not None else 'all'}",
             f"- Batches observed so far: {len(rows)}",
             f"- Successful batches so far: {sum(1 for r in rows if r['status']=='success')}",
@@ -376,6 +465,7 @@ def main() -> int:
             f"- Failed batches so far: {sum(1 for r in rows if r['status'] not in {'success', 'skipped_existing'})}",
             f"- JSON parse failures so far: {json_parse_failures}",
             f"- Invalid code count so far: {invalid_code_count}",
+            f"- Result validation failures so far: {validation_failure_count}",
             f"- HTTP/API error counts so far: `{json.dumps(error_counts, sort_keys=True)}`",
             "",
         ]
@@ -400,6 +490,7 @@ def main() -> int:
         "api_calls_attempted": api_calls_attempted,
         "json_parse_failures": json_parse_failures,
         "invalid_code_count": invalid_code_count,
+        "validation_failure_count": validation_failure_count,
         "error_counts": error_counts,
         "records": len(all_results),
         "rows": rows,
@@ -414,6 +505,8 @@ def main() -> int:
         "",
         f"- Model: `{model}`",
         f"- Base URL host: `{safe_host(base_url)}`",
+        f"- Enable thinking: {str(enable_thinking).lower()}",
+        f"- Extra body sent: {str(send_extra_body).lower()}",
         f"- Batches: {len(rows)}",
         f"- Successful batches: {stats['success']}",
         f"- Skipped existing batches: {stats['skipped_existing']}",
@@ -421,6 +514,7 @@ def main() -> int:
         f"- API calls attempted: {api_calls_attempted}",
         f"- JSON parse failures: {json_parse_failures}",
         f"- Invalid code count: {invalid_code_count}",
+        f"- Result validation failures: {validation_failure_count}",
         f"- HTTP/API error counts: `{json.dumps(error_counts, sort_keys=True)}`",
         "",
     ]

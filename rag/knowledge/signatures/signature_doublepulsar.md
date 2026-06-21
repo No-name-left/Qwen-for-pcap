@@ -28,7 +28,7 @@ Use surrounding evidence carefully. If only a weak or generic SMB anomaly exists
 
 ## Relevant event card fields
 
-Look for `suricata_alerts.signature` containing DOUBLEPULSAR Beacon Response, `suricata_alerts.category` that indicates malware, implant, or backdoor behavior, and SMB context such as port 445. A post-exploitation implant signal should be considered for `backdoor`, `trojan_callback`, or `c2`, with `command_and_control` when the event shows beacon/control exchange.
+Look for DOUBLEPULSAR or SMB implant/beacon indicators in available protocol summaries, port 445 context, characteristic SMB exchanges, and repeated post-exploitation communication. Distinguish exploitation, implant placement, backdoor access, and callback behavior using the official technique boundaries.
 
 ## Source grounding
 

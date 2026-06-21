@@ -94,7 +94,6 @@ def make_scan_group(group: list[dict[str, Any]], idx: int) -> dict[str, Any]:
         "dst_ports_sample": ports[:30],
         "failed_conn_rate": round(len(failed) / len(group), 4) if group else 0.0,
         "member_session_ids": [c["session_id"] for c in group],
-        "suricata_evidence_available": any(bool(c.get("suricata_evidence_available")) for c in group),
         "candidate_hint": "TA43_01",
     }
 
@@ -120,8 +119,6 @@ def make_session_record(card: dict[str, Any]) -> dict[str, Any]:
         "history",
         "zeek_uid",
         "tcp_stream",
-        "related_suricata_alerts",
-        "suricata_evidence_available",
         "http_summary",
         "dns_summary",
         "tls_summary",
@@ -131,7 +128,6 @@ def make_session_record(card: dict[str, Any]) -> dict[str, Any]:
         "same_src_failed_conn_rate",
         "same_dst_unique_src_count",
         "same_src_same_dst_port_count",
-        "time_window_neighbor_alert_count",
     ]
     record = {"record_type": "session", "record_id": card["session_id"], "session_id": card["session_id"]}
     for key in keep:

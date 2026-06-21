@@ -10,7 +10,13 @@ from pathlib import Path
 import yaml
 from openai import OpenAI
 
-from qwen35_rag_utils import ROOT, parse_json_array
+from qwen35_rag_utils import ROOT
+from run_qwen_openai_compatible import (
+    extract_record_id_from_prompt,
+    parse_bool,
+    parse_json_objects,
+    validate_technique_results,
+)
 
 
 def load_env_file(path: Path) -> None:
@@ -50,7 +56,8 @@ def env_from_config(cfg: dict, section: str, key: str):
 
 def api_key_from_env(cfg: dict):
     return (
-        os.environ.get("LLM_API_KEY")
+        os.environ.get("API_KEY")
+        or os.environ.get("LLM_API_KEY")
         or env_from_config(cfg, "provider", "api_key_env")
         or os.environ.get("HF_TOKEN")
         or os.environ.get("HUGGINGFACEHUB_API_TOKEN")
@@ -60,7 +67,7 @@ def api_key_from_env(cfg: dict):
 def call_model(prompt: str, cfg: dict, queue: mp.Queue) -> None:
     try:
         client = OpenAI(base_url=cfg["base_url"], api_key=cfg["api_key"], timeout=cfg["request_timeout"])
-        resp = client.chat.completions.create(
+        request_kwargs = dict(
             model=cfg["model"],
             messages=[{"role": "user", "content": prompt}],
             temperature=cfg["temperature"],
@@ -68,6 +75,11 @@ def call_model(prompt: str, cfg: dict, queue: mp.Queue) -> None:
             max_tokens=cfg["max_tokens"],
             stream=False,
         )
+        if cfg["send_extra_body"]:
+            request_kwargs["extra_body"] = {
+                "chat_template_kwargs": {"enable_thinking": cfg["enable_thinking"]}
+            }
+        resp = client.chat.completions.create(**request_kwargs)
         queue.put({"ok": True, "content": resp.choices[0].message.content or ""})
     except Exception as exc:
         queue.put({"ok": False, "error": f"{type(exc).__name__}: {exc}"})
@@ -81,30 +93,37 @@ def main() -> int:
     parser.add_argument("--result-name", required=True)
     parser.add_argument("--summary-name", required=True)
     parser.add_argument("--hard-timeout", type=int, default=180)
+    parser.add_argument("--enable-thinking", choices=["true", "false"])
+    parser.add_argument("--disable-extra-body", action="store_true")
     args = parser.parse_args()
     load_env_file(ROOT / ".env")
     cfg_raw = yaml.safe_load(args.config.read_text(encoding="utf-8")) if args.config.exists() else {}
     generation = cfg_raw.get("generation", {}) if isinstance(cfg_raw.get("generation"), dict) else {}
-    recommended = cfg_raw.get("recommended_environment", {}) if isinstance(cfg_raw.get("recommended_environment"), dict) else {}
     cfg = {
         "base_url": (
-            os.environ.get("LLM_BASE_URL")
+            os.environ.get("BASE_URL")
+            or os.environ.get("LLM_BASE_URL")
             or env_from_config(cfg_raw, "provider", "base_url_env")
             or cfg_value(cfg_raw, "base_url")
-            or recommended.get("huggingface_router_base_url")
         ),
         "api_key": api_key_from_env(cfg_raw),
         "model": (
-            os.environ.get("LLM_MODEL_NAME")
+            os.environ.get("MODEL")
+            or os.environ.get("LLM_MODEL_NAME")
             or env_from_config(cfg_raw, "provider", "model_name_env")
             or cfg_value(cfg_raw, "model_name")
-            or recommended.get("huggingface_router_model_name")
-            or recommended.get("fallback_model_name")
         ),
         "temperature": float(os.environ.get("LLM_TEMPERATURE", generation.get("temperature", cfg_raw.get("temperature", 0.1)))),
         "top_p": float(os.environ.get("LLM_TOP_P", generation.get("top_p", cfg_raw.get("top_p", 0.8)))),
         "max_tokens": int(os.environ.get("LLM_MAX_TOKENS", generation.get("max_tokens", cfg_raw.get("max_tokens", 2048)))),
         "request_timeout": float(os.environ.get("LLM_REQUEST_TIMEOUT", generation.get("request_timeout_seconds", cfg_raw.get("request_timeout", 90)))),
+        "enable_thinking": parse_bool(
+            args.enable_thinking if args.enable_thinking is not None else os.environ.get("ENABLE_THINKING", os.environ.get("LLM_ENABLE_THINKING")),
+            default=parse_bool(generation.get("enable_thinking"), default=False),
+        ),
+        "send_extra_body": not args.disable_extra_body and parse_bool(
+            os.environ.get("LLM_SEND_EXTRA_BODY"), default=bool(generation.get("send_extra_body", True))
+        ),
     }
     args.output_dir.mkdir(parents=True, exist_ok=True)
     summary_path = args.output_dir / args.summary_name
@@ -112,10 +131,10 @@ def main() -> int:
         summary_path.write_text(
             "# Qwen3.5-27B isolated run summary\n\n"
             "Status: not_started\n\n"
-            "- Missing API key. Set `LLM_API_KEY` or `HF_TOKEN`.\n",
+            "- Missing API configuration. Set BASE_URL/MODEL/API_KEY or their LLM_* aliases.\n",
             encoding="utf-8",
         )
-        print("missing API key; set LLM_API_KEY or HF_TOKEN")
+        print("missing API configuration; set BASE_URL/MODEL/API_KEY or their LLM_* aliases")
         return 2
 
     prompts = sorted(args.prompt_dir.glob("*.txt"))
@@ -125,7 +144,9 @@ def main() -> int:
         raw_path = args.output_dir / f"raw_batch_{idx:03d}.txt"
         parsed_path = args.output_dir / f"parsed_batch_{idx:03d}.json"
         queue: mp.Queue = mp.Queue()
-        proc = mp.Process(target=call_model, args=(prompt_path.read_text(encoding="utf-8"), cfg, queue))
+        prompt_text = prompt_path.read_text(encoding="utf-8")
+        record_id = extract_record_id_from_prompt(prompt_text, prompt_path.stem)
+        proc = mp.Process(target=call_model, args=(prompt_text, cfg, queue))
         proc.start()
         proc.join(args.hard_timeout)
         if proc.is_alive():
@@ -142,7 +163,7 @@ def main() -> int:
                 content = result["content"]
                 raw_path.write_text(content, encoding="utf-8")
                 try:
-                    parsed = parse_json_array(content)
+                    parsed = validate_technique_results(parse_json_objects(content), record_id)
                     parsed_path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
                     all_results.extend(parsed)
                     row = {"batch": idx, "status": "success", "error": "", "prompt": str(prompt_path.resolve().relative_to(ROOT)), "records": len(parsed)}

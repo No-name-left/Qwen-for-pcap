@@ -116,8 +116,6 @@ def normal_like_score(record: dict[str, Any], query: str, ref: dict[str, Any]) -
         score += 6
     if ref.get("reference_family") in {"ctu_normal_like", "ctu_background_like"}:
         score += 4
-    if not record.get("related_suricata_alerts"):
-        score += 1
     if (record.get("same_src_failed_conn_rate") or 0) == 0:
         score += 1
     if (record.get("same_src_unique_dst_ports") or 999) <= 15:
@@ -194,7 +192,7 @@ def main() -> int:
 
     retrieval = {**ctu_retrieval, **portscan_retrieval}
     prompt_counts: dict[str, int] = {}
-    for prompt_dir_name, task in [("prompts_technique_rag", "technique"), ("prompts_stage_rag", "stage")]:
+    for prompt_dir_name, task in [("prompts_technique_rag", "technique")]:
         prompt_dir = args.output_dir / prompt_dir_name
         prompt_dir.mkdir(parents=True, exist_ok=True)
         for old in prompt_dir.glob("*.txt"):
@@ -234,11 +232,10 @@ def main() -> int:
             "",
             f"- Selected records: {len(selected)}",
             f"- Technique RAG prompts: {prompt_counts['prompts_technique_rag']}",
-            f"- Stage RAG prompts: {prompt_counts['prompts_stage_rag']}",
             "- Contains session and scan_group records: true",
             "- RAG prompts include retrieved knowledge snippets from feasibility retrieval outputs.",
             "- Technique allowed codes: `TA43_01`, `TA43_02`, `TA01_01`, `TA01_02`, `TA03_01`, `TA11_01`, `TA11_02`, `TN01_01`.",
-            "- Stage allowed codes: `TA43`, `TA01`, `TA03`, `TA11`, `TN01`.",
+            "- Stage prompts are not generated; stage codes are derived from technique codes.",
             "- Prompt records exclude `candidate_hint` and do not include public label reference answers.",
         ],
     )

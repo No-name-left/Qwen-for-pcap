@@ -22,14 +22,14 @@ def main() -> int:
         f"- Parsed dir: `{args.parsed_dir.relative_to(ROOT) if args.parsed_dir.is_absolute() and ROOT in args.parsed_dir.parents else args.parsed_dir}`",
         f"- Parsed PCAP files: {len(rows)}",
         "",
-        "| case_id | tshark | zeek | suricata | alerts | warnings |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| case_id | zeek | tshark | session parser preference | warnings |",
+        "| --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         warnings = "; ".join(row.get("warnings", [])) or "none"
         lines.append(
-            f"| {row.get('case_id')} | {row.get('tshark_success')} | {row.get('zeek_success')} | "
-            f"{row.get('suricata_success')} | {row.get('suricata_alert_count')} | {warnings} |"
+            f"| {row.get('case_id')} | {row.get('zeek_success')} | {row.get('tshark_success')} | "
+            f"{row.get('session_parser_preference', 'zeek_conn_then_tshark_fallback')} | {warnings} |"
         )
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text("\n".join(lines) + "\n", encoding="utf-8")
