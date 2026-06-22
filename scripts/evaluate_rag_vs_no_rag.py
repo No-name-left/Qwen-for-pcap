@@ -14,6 +14,10 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 TECHNIQUE_CODES = ["TA43_01", "TA43_02", "TA01_01", "TA01_02", "TA03_01", "TA11_01", "TA11_02", "TN01_01"]
 ERROR_CODE = "__ERROR__"
+EVAL_SCOPES = (
+    "strict external", "external_high_pcap", "external_high_flow", "external_medium",
+    "external_low", "synthetic_controlled", "coverage all", "flow_only", "pcap/session-derived",
+)
 
 
 def load_json(path: Path, default: Any) -> Any:
@@ -62,20 +66,25 @@ def failure_type(status: dict[str, Any] | None) -> tuple[str, str]:
 
 
 def scope_filter(row: dict[str, Any], scope: str) -> bool:
-    if scope == "high-confidence only":
-        return row["label_confidence"] == "high"
+    tier = row.get("confidence_level")
+    if not tier:
+        tier = "external_high_flow" if row["label_confidence"] == "high" and row["record_type"] == "flow_only" else "external_high_pcap" if row["label_confidence"] == "high" else "external_medium" if row["label_confidence"] == "medium" else "external_low"
+    if scope == "strict external":
+        return tier in {"external_high_pcap", "external_high_flow"}
+    if scope in {"external_high_pcap", "external_high_flow", "external_medium", "external_low", "synthetic_controlled"}:
+        return tier == scope
     if scope == "flow_only":
         return row["record_type"] == "flow_only"
     if scope == "pcap/session-derived":
         return row["record_type"] != "flow_only"
-    return True
+    return scope == "coverage all"
 
 
 def metric_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     output = []
     for prompt_type in ("no_rag", "rag"):
         prompt_rows = [row for row in rows if row["prompt_type"] == prompt_type]
-        for scope in ("high-confidence only", "all labels", "flow_only", "pcap/session-derived"):
+        for scope in EVAL_SCOPES:
             scoped = [row for row in prompt_rows if scope_filter(row, scope)]
             total = len(scoped)
             correct = sum(row["predicted_code"] == row["ground_truth_technique_code"] for row in scoped)
@@ -126,6 +135,7 @@ def main() -> int:
                 "dataset_id": record["dataset_id"],
                 "ground_truth_technique_code": record["technique_code"],
                 "label_confidence": record["label_confidence"],
+                "confidence_level": record.get("confidence_level"),
                 "record_type": record["record_type"],
                 "prompt_type": prompt_type,
                 "prompt_version": context.get("prompt_version", "unknown"),
@@ -152,7 +162,7 @@ def main() -> int:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
         for prompt_type in ("no_rag", "rag"):
-            for scope in ("high-confidence only", "all labels", "flow_only", "pcap/session-derived"):
+            for scope in EVAL_SCOPES:
                 scoped = [row for row in long_rows if row["prompt_type"] == prompt_type and scope_filter(row, scope)]
                 for code in TECHNIQUE_CODES:
                     code_rows = [row for row in scoped if row["ground_truth_technique_code"] == code]
@@ -185,6 +195,7 @@ def main() -> int:
             error_cases.append({
                 "record_id": record_id, "dataset_id": no_rag["dataset_id"], "ground_truth": truth,
                 "label_confidence": no_rag["label_confidence"], "record_type": no_rag["record_type"],
+                "confidence_level": no_rag.get("confidence_level"),
                 "no_rag_prediction": no_rag["predicted_code"], "rag_prediction": rag["predicted_code"],
                 "no_rag_error": no_rag["error_type"], "rag_error": rag["error_type"],
                 "rag_improved": record_id in improved, "rag_worsened": record_id in worsened,
@@ -215,7 +226,7 @@ def main() -> int:
         for left, right in important_pairs:
             count = confusion[(prompt_type, left, right)] + confusion[(prompt_type, right, left)]
             lines.append(f"| {prompt_type} | `{left}` ↔ `{right}` | {count} |")
-    lines.extend(["", "## Pair changes", "", f"- Improved IDs: {', '.join(improved) if improved else 'none'}", f"- Worsened IDs: {', '.join(worsened) if worsened else 'none'}", f"- Disagreement IDs: {', '.join(disagreements) if disagreements else 'none'}", "", "Medium/low label rows are exploratory and are not merged into the high-confidence-only metric."])
+    lines.extend(["", "## Pair changes", "", f"- Improved IDs: {', '.join(improved) if improved else 'none'}", f"- Worsened IDs: {', '.join(worsened) if worsened else 'none'}", f"- Disagreement IDs: {', '.join(disagreements) if disagreements else 'none'}", "", "Only external_high_pcap/external_high_flow rows enter strict external metrics. Medium/low and synthetic rows remain coverage-only."])
     (args.output_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(json.dumps({"records": len(records), "rows": len(long_rows), "improved": len(improved), "worsened": len(worsened), "disagreements": len(disagreements)}))
     return 0

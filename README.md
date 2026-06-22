@@ -47,11 +47,13 @@ Technique-to-stage fallback is deterministic: `TA43_* -> TA43`, `TA01_* -> TA01`
 
 ## Current Data Coverage
 
-- High-confidence PCAP/Zeek coverage: `TA43_01`, `TA11_02`.
-- Secondary flow-only coverage: `TA01_01`, `TA01_02`, `TN01_01`.
-- Missing or low-confidence coverage: `TA43_02`, `TA03_01`, `TA11_01`.
+- External-high PCAP coverage: `TA43_01=3`, `TA11_02=3` evaluation records.
+- External-high flow-only coverage: `TA01_01=5`, `TN01_01=4`; external-medium: `TA01_02=5`, `TA11_02=2`.
+- External gaps: `TA43_02`, `TA03_01`, `TA11_01`; each has three localhost `synthetic_controlled` coverage fixtures, never strict evidence.
+- Real-API readiness candidates: 24 records (three per technique), with a 12-record external-high strict subset.
 
 See `docs/official_code_data_rag_sft_small_test_summary.md` and `datasets/metadata/official_code_data_coverage_audit.md` for details.
+The current tiered review is `docs/reports/data_completion_round_report.md`.
 
 ## Current Evaluation Status
 
@@ -81,6 +83,7 @@ Environment check:
 
 ```bash
 bash scripts/check_env.sh
+python3 scripts/check_remote_api_readiness.py --dry-run
 ```
 
 Rebuild local RAG:
@@ -113,6 +116,8 @@ The runner sends Qwen `chat_template_kwargs.enable_thinking=false` by default. U
 Targeted RAG is not unconditional prompt padding. Scan, authentication, Web/exploit, backdoor-direction, or outbound TLS/DNS/C2 features select only the relevant short boundary cards; ordinary top-ranked RAG follows within the runtime-profile budget.
 
 Do not run API batches blindly. Use the current small coverage set first, inspect the reports, then expand only if error analysis improves.
+
+Real API execution is additionally gated by a passing readiness report, `RUN_REAL_API_TEST=1`, and at most two paired records (four calls). `scripts/estimate_api_eval_cost.py` estimates larger plans without making calls.
 
 ## Important Documents
 

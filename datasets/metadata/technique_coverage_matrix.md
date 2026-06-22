@@ -1,20 +1,21 @@
 # Official technique coverage matrix
 
-Updated: 2026-06-22. Confidence describes semantic label alignment, not competition ground truth. PCAP/session-derived and flow-only counts are never pooled.
+Updated: 2026-06-22. Counts are runnable classification records. Synthetic and external domains are never merged.
 
-| Technique | Locally available sources | Confidence and evidence type | Current eval count | Strict test readiness | Training policy | Gap / next acquisition |
-|---|---|---|---:|---|---|---|
-| `TA43_01` port scan | Controlled local Nmap PCAP → Zeek `scan_group`; catalogued CIC/BoT-IoT/ToN-IoT candidates not local | high controlled PCAP/session-derived | 1 high scan_group | No: below 20 and one controlled environment | Boundary/format smoke only; one record cannot train a class | Add diverse Nmap TCP/UDP scans and benign/vulnerability-probe negatives. |
-| `TA43_02` vulnerability scan | No runnable record; BoT-IoT Service Scan, UNSW Analysis, CSE service enumeration are only candidates | medium/low flow candidate; no trusted PCAP | 0 | No | Do not train | Curate small Nikto/OpenVAS/Nmap NSE/service-enumeration PCAPs with explicit command/timeline labels. |
-| `TA01_01` password brute force | CSE-CIC-IDS2018 FTP/SSH brute-force CSV | high label, flow-only | 5 high flow-only | No: below 20 and no session-derived set | Can help reviewed format/boundary tuning only; keep flow domain explicit | Add PCAP-aligned Patator/SSH/FTP attempts plus successful/low-retry negatives. |
-| `TA01_02` vulnerability exploitation | CSE-CIC-IDS2018 SQL Injection/XSS CSV; UNSW/CIC Heartbleed only catalogued | current rows medium, flow-only | 5 medium flow-only | No high-confidence test rows | Do not use current medium rows as strong supervision | Acquire payload-visible, PCAP-aligned exploit attempts and ordinary Web negatives. |
-| `TA03_01` backdoor implantation | No runnable record; CIC infiltration/UNSW backdoor-family narratives are low candidates | low/manual; phase not established | 0 | No | Never train from broad infiltration/family labels | Curate webshell upload, payload download, backdoor deployment and post-exploit persistence timelines. |
-| `TA11_01` backdoor access | No runnable record; infiltration/backdoor-family candidates lack direction and phase | low/manual | 0 | No | Never train without existing-backdoor and operator-access evidence | Curate attacker-to-backdoor/webshell access, interactive reverse-shell and post-backdoor sessions. |
-| `TA11_02` trojan callback | Four CTU-13 PCAPs with matching binetflow/README; CSE Bot flow rows | CTU high PCAP/session-derived; CSE medium flow-only | 3 high sessions + 2 medium flow-only | No: only 3 high session records in current holdout | 57 separately audited high CTU candidates may cautiously teach format/behavior, but do not imply eight-class readiness | Add malware-family diversity and benign periodic HTTPS/DNS negatives. |
-| `TN01_01` normal business | CSE benign CSV; CTU `From-Normal*` companion labels; background excluded | CSE high flow-only; CTU normal candidate requires session split | 4 high flow-only | No: below 20 and no current high session holdout | Reviewed explicit normal only; never promote CTU `Background*` | Add diverse benign PCAP sessions, normal login/Web/TLS/DNS and periodic service traffic. |
+| Technique | ext high PCAP | ext high flow | ext medium | ext low | synthetic | Strict status | Main limitation / acquisition target |
+|---|---:|---:|---:|---:|---:|---|---|
+| `TA43_01` | 3 | 0 | 0 | 0 | 4 | small PCAP subset | Wireshark Nmap is explicit but only one tool/family; add Zmap/SYN/connect diversity. |
+| `TA43_02` | 0 | 0 | 0 | 0 | 3 | no external strict data | Acquire explicit Nmap NSE/Nikto/OpenVAS/service-version/plugin PCAP. |
+| `TA01_01` | 0 | 5 | 0 | 0 | 3 | flow-only strict subset | Add PCAP-aligned SSH/FTP/RDP/HTTP repeated failed authentication. |
+| `TA01_02` | 0 | 0 | 5 | 0 | 3 | coverage-only | Current CSE SQLi/XSS rows lack packet payload; acquire payload-visible exploit-attempt PCAP. |
+| `TA03_01` | 0 | 0 | 0 | 0 | 3 | synthetic only | Acquire packet/timeline-visible harmless marker or real incident upload/deployment evidence without malware samples. |
+| `TA11_01` | 0 | 0 | 0 | 0 | 3 | synthetic only | Acquire direction-verified operator access to an existing webshell/backdoor. |
+| `TA11_02` | 3 | 0 | 2 | 0 | 3 | small PCAP subset | CTU source labels support infected-host traffic; add family diversity and benign callback-like negatives. |
+| `TN01_01` | 0 | 4 | 0 | 0 | 3 | flow-only strict subset | Add diverse benign HTTP/DNS/TLS/login PCAP sessions. |
 
-## Readiness conclusion
+## Policy
 
-- Strict high-confidence test: **not ready for any class at the preferred 20-record threshold**. `TA43_01` and `TA11_02` have high PCAP/session-derived evidence, but only 1 and 3 holdout records. `TA01_01` and `TN01_01` have only 5 and 4 high flow-only rows and must be reported separately.
-- SFT/LoRA: **not ready as a balanced eight-class set**. The reviewed inventory has 57 `accept_high` records, all `TA11_02`; the remaining accepted rows are medium and need review. It is acceptable to use carefully reviewed samples for JSON/schema and boundary behavior experiments, with domain/provenance fields retained, but not as broad security-knowledge supervision.
-- `TA43_02`, `TA03_01`, and `TA11_01` remain deliberate gaps. No low-confidence mapping was upgraded to close them.
+- Strict subset: `external_high_pcap` and `external_high_flow` only, with those two domains reported separately.
+- Coverage subset: may add `external_medium` and `synthetic_controlled`, visibly tiered.
+- `external_low` remains catalog/manual analysis only; there are currently zero normalized low runnable records.
+- No SFT/LoRA construction is performed in this round.

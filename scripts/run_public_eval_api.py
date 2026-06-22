@@ -124,6 +124,7 @@ def main() -> int:
     parser.add_argument("--run-mock", action="store_true", help="Run paired prompts through dry_run_mock; no network/model call.")
     parser.add_argument("--runtime-profiles", type=Path, default=DEFAULT_RUNTIME_PROFILES)
     parser.add_argument("--runtime-profile", default=os.environ.get("RUNTIME_PROFILE", "ascend_openeuler_qwen35_27b"))
+    parser.add_argument("--readiness-report", type=Path, default=ROOT / "outputs/api_readiness/api_readiness_report.json")
     parser.add_argument("--max-records", type=int, default=20)
     parser.add_argument("--max-per-class", type=int, default=5)
     parser.add_argument("--max-tokens", type=int, help="Completion budget; defaults to the selected runtime profile.")
@@ -135,8 +136,8 @@ def main() -> int:
         parser.error("--run-api and --run-mock are mutually exclusive")
     load_env_file(ROOT / ".env")
     load_env_file(ROOT / ".env.local")
-    if not 1 <= args.max_records <= 20:
-        parser.error("--max-records must be between 1 and 20")
+    if not 1 <= args.max_records <= 64:
+        parser.error("--max-records must be between 1 and 64")
     if args.max_per_class < 1:
         parser.error("--max-per-class must be positive")
     records = select_records(load_jsonl(args.eval_records), args.max_records, args.max_per_class)
@@ -154,8 +155,8 @@ def main() -> int:
         "selected_record_ids": [item["record_id"] for item in records],
         "records": context_records,
         "runtime_profile": args.runtime_profile,
-        "model": profile.get("model") or model or "not_configured",
-        "base_url_host": host_only(str(profile.get("base_url") or base_url or "")),
+        "model": profile.get("model") if args.run_mock else model or profile.get("model") or "not_configured",
+        "base_url_host": host_only(str(profile.get("base_url") if args.run_mock else base_url or profile.get("base_url") or "")),
         "run_api": args.run_api,
         "run_mock": args.run_mock,
         "temperature": 0,
@@ -167,6 +168,17 @@ def main() -> int:
     if not args.run_api and not args.run_mock:
         print(f"dry-run complete: generated paired prompts for {len(records)} records; no API call made")
         return 0
+    if args.run_api:
+        if os.environ.get("RUN_REAL_API_TEST") != "1":
+            print("real API call blocked: set RUN_REAL_API_TEST=1 after readiness passes", file=sys.stderr)
+            return 2
+        if len(records) > 2:
+            print("real API call blocked: tiny policy permits at most 2 paired records (2 no-RAG + 2 RAG)", file=sys.stderr)
+            return 2
+        readiness = json.loads(args.readiness_report.read_text(encoding="utf-8")) if args.readiness_report.exists() else {}
+        if not readiness.get("ready_for_tiny_real_eval"):
+            print(f"real API call blocked: readiness report is missing or not passing: {args.readiness_report}", file=sys.stderr)
+            return 2
     if args.run_api and (not base_url or not model or not api_key):
         print("--run-api requires BASE_URL/MODEL/API_KEY or LLM_BASE_URL/LLM_MODEL_NAME/LLM_API_KEY; no call made", file=sys.stderr)
         return 2

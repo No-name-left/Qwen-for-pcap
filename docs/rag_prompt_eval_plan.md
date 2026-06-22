@@ -6,7 +6,7 @@
 - The model predicts one official `technique_code`; it never predicts `stage_code`.
 - Ground truth and label confidence remain outside `CLASSIFICATION_RECORD` and outside retrieved snippets.
 - Default execution only creates prompts. API calls require the explicit `--run-api` switch.
-- API runs use `temperature=0`, the selected profile's output-token budget, at most 20 records, and Qwen thinking disabled by default.
+- Prompt/mock preparation may use up to 64 records. Real API execution is safety-gated to at most two paired records (four calls), `RUN_REAL_API_TEST=1`, and a passing readiness report.
 - Current prompt version is `boundary_rag_v2`; every prompt manifest and evaluation context records it.
 - Targeted RAG cards are selected from record features for the five named confusion pairs. They are ordered before ordinary top-k snippets but remain subordinate to record evidence.
 - Runtime-profile budgets cap session context, snippet count/size and final prompt length.
@@ -26,6 +26,11 @@ python3 scripts/run_public_eval_api.py --run-api --disable-extra-body
 
 # Paired deterministic plumbing test, no network/model call
 python3 scripts/run_public_eval_api.py --run-mock --max-records 20 --max-per-class 5
+
+# 24-record tiered candidate plumbing test (still no real model call)
+python3 scripts/run_public_eval_api.py \
+  --eval-records datasets/public_eval/real_api_candidate_records.jsonl \
+  --run-mock --max-records 24 --max-per-class 3
 
 # Re-evaluate already saved runner outputs without another API call
 python3 scripts/evaluate_rag_vs_no_rag.py

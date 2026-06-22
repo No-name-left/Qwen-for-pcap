@@ -16,6 +16,8 @@ Updated: 2026-06-22. This inventory describes files observed on disk, not stale 
 | CSE-CIC-IDS2018 | `Friday-02-03-2018_TrafficForML_CICFlowMeter.csv` | flow CSV | 352,368,373 bytes | existing | Bot and benign; flow-only. |
 | CSE-CIC-IDS2018 | `Thursday-01-03-2018_TrafficForML_CICFlowMeter.csv` | flow CSV | 107,842,858 bytes | existing | Infiltration is low-confidence for substage mapping; flow-only. |
 | Controlled port scan | `datasets/public/feasibility/raw/portscan/generated_nmap_local_scan.pcap` | PCAP | 95,168 bytes | existing | Local controlled sample; one Zeek `scan_group` with 181 destination ports. |
+| Wireshark NMap Captures | `nmap_standard_scan.pcap`, `nmap_OS_scan.pcap`, `nmap_OS_scan_successful.pcap` | PCAP | 152,292 + 161,520 + 157,862 bytes | downloaded | Official archive README records exact Nmap commands; three external-high `TA43_01` scan groups, not vulnerability scans. |
+| Synthetic controlled | 24 loopback fixtures under `datasets/public/synthetic_controlled/raw/` | PCAP | 183,114 bytes total | generated local | Three per code; coverage-only, tracked separately, never external or strict. |
 
 Exact hashes and statuses are maintained in `download_manifest.csv`.
 
@@ -23,7 +25,7 @@ Exact hashes and statuses are maintained in `download_manifest.csv`.
 
 - Official/source pages are present for CIC-IDS2017, CSE-CIC-IDS2018, UNSW-NB15 and the AWS registry/listing.
 - Source-page snapshots were added for CTU-13, IoT-23, BoT-IoT, ToN-IoT, CICIoT2023, and Malware-Traffic-Analysis.net.
-- `datasets/public/wireshark_nmap/raw/NMap-Captures.zip` is zero bytes and is recorded as failed/empty, not downloaded.
+- The historical zero-byte Wireshark Nmap ZIP was repaired using the current official GitLab wiki attachment; selected captures and command README now validate successfully.
 - `datasets/metadata/dataset_manifest.csv` contains historical paths that are currently absent. Those rows remain historical and are not promoted to `already_exists`.
 
 ## Other scanned roots
@@ -35,6 +37,6 @@ Exact hashes and statuses are maintained in `download_manifest.csv`.
 
 ## Current limitations
 
-- No high-confidence local data yet exists for `TA43_02`, `TA03_01`, or `TA11_01`.
+- No high-confidence **external** local data yet exists for `TA43_02`, `TA03_01`, or `TA11_01`; their new runnable fixtures are synthetic controlled only.
 - CSE-CIC flow records must stay `flow_only`; they are useful for prompt boundaries but not for PCAP/session accuracy claims.
 - Additional downloaded CTU scenarios strengthen `TA11_02` only; they do not close backdoor-install/access gaps.

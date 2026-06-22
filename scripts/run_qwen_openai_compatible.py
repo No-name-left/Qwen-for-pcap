@@ -299,8 +299,9 @@ def main() -> int:
     load_env_file(ROOT / ".env.local")
     cfg = load_config(args.config)
     profile = load_runtime_profile(args.runtime_profile, args.runtime_profiles)
+    mock_mode = bool(profile.get("mock", False))
     generation = cfg.get("generation", {}) if isinstance(cfg.get("generation"), dict) else {}
-    base_url = (
+    base_url = profile.get("base_url") if mock_mode else (
         os.environ.get("BASE_URL")
         or os.environ.get("LLM_BASE_URL")
         or env_from_config(cfg, "provider", "base_url_env")
@@ -308,7 +309,7 @@ def main() -> int:
         or cfg_value(cfg, "base_url")
     )
     api_key = api_key_from_env(cfg)
-    model = (
+    model = profile.get("model") if mock_mode else (
         os.environ.get("MODEL")
         or os.environ.get("LLM_MODEL_NAME")
         or env_from_config(cfg, "provider", "model_name_env")
@@ -327,7 +328,6 @@ def main() -> int:
     send_extra_body = not args.disable_extra_body and parse_bool(
         os.environ.get("LLM_SEND_EXTRA_BODY"), default=bool(profile.get("send_extra_body", generation.get("send_extra_body", True)))
     )
-    mock_mode = bool(profile.get("mock", False))
     if args.require_run_api_flag and os.environ.get("RUN_API") != "1":
         args.output_dir.mkdir(parents=True, exist_ok=True)
         (args.output_dir / args.summary_name).write_text(

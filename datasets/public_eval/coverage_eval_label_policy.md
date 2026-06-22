@@ -1,27 +1,30 @@
 # Coverage evaluation label policy
 
-- `high` rows form the primary test metric.
-- `medium` and `low` rows remain in the coverage file as `exploratory`; reports must not merge them into the high-confidence metric.
-- `flow_only` rows test prompt/RAG boundaries and are always reported separately from PCAP/session-derived rows.
-- A public source label is not official competition ground truth; provenance and mapping confidence remain attached to every record.
-- Missing classes are left empty rather than filled with guessed labels.
+The `confidence_level` field is authoritative:
 
-## Current split
+- `external_high_pcap`: public high-confidence PCAP/session-derived; eligible for strict PCAP metrics.
+- `external_high_flow`: public high-confidence flow-only; eligible for strict flow metrics, reported separately.
+- `external_medium`: prompt/RAG boundary debugging only.
+- `external_low`: candidate/background analysis only.
+- `synthetic_controlled`: pipeline and missing-behavior coverage only; never public/external or strict evidence.
 
-- Records: 20
-- Missing technique codes: TA43_02, TA03_01, TA11_01
+Strict combined summaries may include both external-high tiers only when their PCAP and flow components are also shown separately. No medium, low or synthetic row enters strict accuracy.
 
-| Technique | Confidence | Record type | Count |
+## Current public coverage records
+
+- Records: 23
+- Strict external: 15 (6 PCAP/session-derived, 9 flow-only)
+- Coverage-only: 7 external-medium plus 1 legacy controlled fixture
+- Missing external high PCAP classes: `TA43_02`, `TA01_01`, `TA01_02`, `TA03_01`, `TA11_01`, `TN01_01`
+
+| Technique | Tier | Record type | Count |
 |---|---|---|---:|
-| `TA01_01` | high | `flow_only` | 5 |
-| `TA01_02` | medium | `flow_only` | 5 |
-| `TA11_02` | high | `session` | 3 |
-| `TA11_02` | medium | `flow_only` | 2 |
-| `TA43_01` | high | `scan_group` | 1 |
-| `TN01_01` | high | `flow_only` | 4 |
+| `TA43_01` | `external_high_pcap` | `scan_group` | 3 |
+| `TA43_01` | `synthetic_controlled` | `scan_group` | 1 |
+| `TA01_01` | `external_high_flow` | `flow_only` | 5 |
+| `TA01_02` | `external_medium` | `flow_only` | 5 |
+| `TA11_02` | `external_high_pcap` | `session` | 3 |
+| `TA11_02` | `external_medium` | `flow_only` | 2 |
+| `TN01_01` | `external_high_flow` | `flow_only` | 4 |
 
-## Known semantic gaps
-
-- `TA43_02`: service enumeration is only a proxy for vulnerability scanning.
-- `TA03_01`: broad infiltration or malware-family labels do not prove network-visible backdoor installation.
-- `TA11_01`: backdoor-family labels do not prove operator access direction or phase.
+`TA43_02`, `TA03_01`, and `TA11_01` have no runnable external record. Their three-per-class real-API coverage candidates are maintained only in `synthetic_controlled_manifest.csv` and `real_api_candidate_manifest.csv`.

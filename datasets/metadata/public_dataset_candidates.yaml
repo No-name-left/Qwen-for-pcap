@@ -150,3 +150,48 @@ datasets:
     download_status: manual_required
     local_path: datasets/public/malware_traffic_analysis
     notes: Manual validation corpus only, not automatically labeled training data.
+
+  - dataset_id: wireshark_nmap
+    official_name: Wireshark SampleCaptures NMap Captures
+    official_page: https://gitlab.com/wireshark/wireshark/-/wikis/SampleCaptures
+    source_type: pcap
+    expected_size: "official ZIP 114641 bytes; three selected captures total 471674 bytes extracted"
+    download_method: direct
+    priority: P0
+    candidate_technique_codes: [TA43_01]
+    label_source: archive README with exact Nmap commands
+    license_or_terms: preserve Wireshark wiki attribution and source URL
+    safety_notes: selected PCAP and README only; no executable content
+    download_status: downloaded
+    local_path: datasets/public/wireshark_nmap
+    notes: Default and OS discovery scans are high-confidence port-scan/recon evidence; none is vulnerability-specific TA43_02.
+
+  - dataset_id: attack_scenario_kaggle
+    official_name: Attack Scenario Dataset in PCAP format
+    official_page: https://www.kaggle.com/datasets/olaidegabriel/attack-scenario-dataset-in-pcap-format
+    source_type: pcap
+    expected_size: "218964654 bytes according to the public data card"
+    download_method: manual
+    priority: P2
+    candidate_technique_codes: [TA01_01, TA01_02, TA11_01, TA11_02, TN01_01]
+    label_source: implicit PCAP filenames only; no centralized ground truth
+    license_or_terms: CC0 as stated by the Kaggle data card
+    safety_notes: PCAP only; never execute or export embedded payload objects
+    download_status: manual_required
+    local_path: datasets/public/attack_scenario_kaggle
+    notes: Potentially useful medium-confidence Hydra/normal/exploit cases; broad backdoor/malware names remain low until phase evidence is reviewed.
+
+  - dataset_id: cyberdefenders_webstrike
+    official_name: CyberDefenders WebStrike
+    official_page: https://cyberdefenders.org/walkthroughs/webstrike/
+    source_type: pcap
+    expected_size: "small focused capture; account/exercise download size requires confirmation"
+    download_method: manual
+    priority: P1
+    candidate_technique_codes: [TA03_01, TA11_01]
+    label_source: official walkthrough describing webshell upload and subsequent reverse-shell activity
+    license_or_terms: review CyberDefenders account and exercise terms before acquisition or redistribution
+    safety_notes: acquire PCAP only; do not download/extract/execute webshell or challenge payload files
+    download_status: manual_required
+    local_path: datasets/public/cyberdefenders_webstrike
+    notes: Strong gap candidate after per-session direction/timeline review; not currently available and not strict evidence yet.
