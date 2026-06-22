@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 import yaml
 from openai import OpenAI
 
-from qwen35_rag_utils import ROOT, strip_markdown_fence
+from qwen35_rag_utils import DEFAULT_RUNTIME_PROFILES, ROOT, load_env_file, load_runtime_profile, strip_markdown_fence
 
 
 TECHNIQUE_CODES = {"TA43_01", "TA43_02", "TA01_01", "TA01_02", "TA03_01", "TA11_01", "TA11_02", "TN01_01"}
@@ -30,20 +30,6 @@ def load_config(path: Path) -> dict:
     if path.exists():
         return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     return {}
-
-
-def load_env_file(path: Path) -> None:
-    if not path.exists():
-        return
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
 
 
 def cfg_value(cfg: dict, key: str):
@@ -145,6 +131,43 @@ def extract_record_id_from_prompt(prompt_text: str, fallback: str) -> str:
     if isinstance(record, dict):
         return str(record.get("record_id") or record.get("session_id") or fallback)
     return fallback
+
+
+def extract_record_from_prompt(prompt_text: str) -> dict[str, Any]:
+    marker = "CLASSIFICATION_RECORD:"
+    if marker not in prompt_text:
+        return {}
+    try:
+        value, _ = json.JSONDecoder().raw_decode(prompt_text.split(marker, 1)[1].strip())
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def mock_result(prompt_text: str, record_id: str) -> dict[str, Any]:
+    """Deterministic smoke output; intentionally not a model-quality baseline."""
+    record = extract_record_from_prompt(prompt_text)
+    blob = json.dumps(record, ensure_ascii=False).lower()
+    if record.get("record_type") == "scan_group" or float(record.get("unique_dst_ports") or 0) >= 8:
+        code = "TA43_01"
+    elif any(word in blob for word in ("bruteforce", "brute force", "ftp-bruteforce", "ssh-bruteforce")):
+        code = "TA01_01"
+    elif any(word in blob for word in ("sql injection", "command injection", "cve-", "../")):
+        code = "TA01_02"
+    elif any(word in blob for word in ("callback", "botnet", "beacon", "c2", "cnc")):
+        code = "TA11_02"
+    else:
+        code = "TN01_01"
+    return {
+        "record_id": record_id,
+        "pcap_id": record.get("pcap_id"),
+        "record_type": record.get("record_type", "session"),
+        "start_time": record.get("start_time"), "end_time": record.get("end_time"),
+        "src_ip": record.get("src_ip"), "src_port": record.get("src_port"),
+        "dst_ip": record.get("dst_ip"), "dst_port": record.get("dst_port"),
+        "predicted_code": code, "confidence": 0.5,
+        "reason": "Deterministic dry-run mock for pipeline validation.",
+    }
 
 
 def load_record_id_filter(value: str | None) -> set[str] | None:
@@ -251,6 +274,8 @@ def parse_bool(value: str | bool | None, default: bool = False) -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run Qwen/OpenAI-compatible batch prompts.")
     parser.add_argument("--config", type=Path, default=ROOT / "configs/llm_qwen35_27b.yaml")
+    parser.add_argument("--runtime-profiles", type=Path, default=DEFAULT_RUNTIME_PROFILES)
+    parser.add_argument("--runtime-profile", default=os.environ.get("RUNTIME_PROFILE", "ascend_openeuler_qwen35_27b"))
     parser.add_argument("--prompt-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--result-name", required=True)
@@ -271,12 +296,15 @@ def main() -> int:
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     load_env_file(ROOT / ".env")
+    load_env_file(ROOT / ".env.local")
     cfg = load_config(args.config)
+    profile = load_runtime_profile(args.runtime_profile, args.runtime_profiles)
     generation = cfg.get("generation", {}) if isinstance(cfg.get("generation"), dict) else {}
     base_url = (
         os.environ.get("BASE_URL")
         or os.environ.get("LLM_BASE_URL")
         or env_from_config(cfg, "provider", "base_url_env")
+        or profile.get("base_url")
         or cfg_value(cfg, "base_url")
     )
     api_key = api_key_from_env(cfg)
@@ -284,20 +312,22 @@ def main() -> int:
         os.environ.get("MODEL")
         or os.environ.get("LLM_MODEL_NAME")
         or env_from_config(cfg, "provider", "model_name_env")
+        or profile.get("model")
         or cfg_value(cfg, "model_name")
     )
     temperature = args.temperature if args.temperature is not None else float(os.environ.get("LLM_TEMPERATURE", generation.get("temperature", cfg.get("temperature", 0.1))))
-    max_tokens = args.max_tokens if args.max_tokens is not None else int(os.environ.get("LLM_MAX_TOKENS", generation.get("max_tokens", cfg.get("max_tokens", 8192))))
+    max_tokens = args.max_tokens if args.max_tokens is not None else int(os.environ.get("LLM_MAX_TOKENS", profile.get("max_output_tokens", generation.get("max_tokens", cfg.get("max_tokens", 512)))))
     top_p = float(os.environ.get("LLM_TOP_P", generation.get("top_p", cfg.get("top_p", 0.8))))
     enable_thinking = parse_bool(
         args.enable_thinking
         if args.enable_thinking is not None
         else os.environ.get("ENABLE_THINKING", os.environ.get("LLM_ENABLE_THINKING")),
-        default=parse_bool(generation.get("enable_thinking"), default=False),
+        default=parse_bool(profile.get("enable_thinking", generation.get("enable_thinking")), default=False),
     )
     send_extra_body = not args.disable_extra_body and parse_bool(
-        os.environ.get("LLM_SEND_EXTRA_BODY"), default=bool(generation.get("send_extra_body", True))
+        os.environ.get("LLM_SEND_EXTRA_BODY"), default=bool(profile.get("send_extra_body", generation.get("send_extra_body", True)))
     )
+    mock_mode = bool(profile.get("mock", False))
     if args.require_run_api_flag and os.environ.get("RUN_API") != "1":
         args.output_dir.mkdir(parents=True, exist_ok=True)
         (args.output_dir / args.summary_name).write_text(
@@ -306,7 +336,7 @@ def main() -> int:
         )
         print("missing RUN_API=1; no call made")
         return 2
-    if not base_url or not api_key or not model:
+    if not base_url or not model or (not api_key and not mock_mode):
         args.output_dir.mkdir(parents=True, exist_ok=True)
         summary = args.output_dir / args.summary_name
         summary.write_text(
@@ -338,7 +368,7 @@ def main() -> int:
     request_timeout = args.timeout_seconds if args.timeout_seconds is not None else float(
         os.environ.get("LLM_REQUEST_TIMEOUT", generation.get("request_timeout_seconds", cfg.get("request_timeout", 180)))
     )
-    client = OpenAI(base_url=base_url, api_key=api_key, timeout=request_timeout)
+    client = None if mock_mode else OpenAI(base_url=base_url, api_key=api_key, timeout=request_timeout)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     raw_dir = args.output_dir / "raw"
     parsed_dir = args.output_dir / "parsed"
@@ -388,23 +418,24 @@ def main() -> int:
         invalid_codes_for_batch = 0
         for attempt in range(args.retries + 1):
             try:
-                api_calls_attempted += 1
-                request_kwargs: dict[str, Any] = {
-                    "model": model,
-                    "messages": [{"role": "user", "content": prompt_text}],
-                    "temperature": temperature,
-                    "top_p": top_p,
-                    "max_tokens": max_tokens,
-                    "stream": False,
-                }
-                if send_extra_body:
-                    request_kwargs["extra_body"] = {
-                        "chat_template_kwargs": {"enable_thinking": enable_thinking}
+                if mock_mode:
+                    content = json.dumps(mock_result(prompt_text, record_id), ensure_ascii=False)
+                else:
+                    api_calls_attempted += 1
+                    request_kwargs: dict[str, Any] = {
+                        "model": model,
+                        "messages": [{"role": "user", "content": prompt_text}],
+                        "temperature": temperature,
+                        "top_p": top_p,
+                        "max_tokens": max_tokens,
+                        "stream": False,
                     }
-                response = client.chat.completions.create(
-                    **request_kwargs,
-                )
-                content = response.choices[0].message.content or ""
+                    if send_extra_body:
+                        request_kwargs["extra_body"] = {
+                            "chat_template_kwargs": {"enable_thinking": enable_thinking}
+                        }
+                    response = client.chat.completions.create(**request_kwargs)
+                    content = response.choices[0].message.content or ""
                 raw_path.write_text(content, encoding="utf-8")
                 (raw_dir / f"raw_batch_{idx:03d}_attempt_{attempt + 1:02d}.txt").write_text(content, encoding="utf-8")
                 parsed = parse_json_objects(content)
@@ -454,6 +485,8 @@ def main() -> int:
             "# Qwen3.5-27B run summary",
             "",
             f"- Model: `{model}`",
+            f"- Runtime profile: `{args.runtime_profile}`",
+            f"- Mock mode: {str(mock_mode).lower()}",
             f"- Base URL host: `{safe_host(base_url)}`",
             f"- Request timeout seconds: {request_timeout}",
             f"- Enable thinking: {str(enable_thinking).lower()}",
@@ -488,6 +521,8 @@ def main() -> int:
         "failed": sum(1 for r in rows if r["status"] not in {"success", "skipped_existing"}),
         "skipped_existing": sum(1 for r in rows if r["status"] == "skipped_existing"),
         "api_calls_attempted": api_calls_attempted,
+        "runtime_profile": args.runtime_profile,
+        "mock_mode": mock_mode,
         "json_parse_failures": json_parse_failures,
         "invalid_code_count": invalid_code_count,
         "validation_failure_count": validation_failure_count,
@@ -504,6 +539,8 @@ def main() -> int:
         "# Qwen3.5-27B run summary",
         "",
         f"- Model: `{model}`",
+        f"- Runtime profile: `{args.runtime_profile}`",
+        f"- Mock mode: {str(mock_mode).lower()}",
         f"- Base URL host: `{safe_host(base_url)}`",
         f"- Enable thinking: {str(enable_thinking).lower()}",
         f"- Extra body sent: {str(send_extra_body).lower()}",

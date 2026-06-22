@@ -1,7 +1,7 @@
 # Qwen3.5-27B RAG retrieval test report
 
-- Queries: 15
-- Passed: 15/15
+- Queries: 20
+- Passed: 20/20
 - Ready for retrieval test: yes
 
 ## q001_strrat_cnc_checkin
@@ -37,7 +37,7 @@
 ## q007_sql_injection_union_select
 - pass: True
 - expected: protocol_http, signature_web_sql_injection, web_exploit_detection
-- retrieved: competition_TA01_02_exploit, normal_http_vs_web_exploit, protocol_http, signature_web_sql_injection, web_exploit_detection
+- retrieved: boundary_ta01_02_vs_tn01_01, normal_http_vs_web_exploit, protocol_http, signature_web_sql_injection, web_exploit_detection
 
 ## q008_xss_script_injection
 - pass: True
@@ -47,12 +47,12 @@
 ## q009_directory_traversal_passwd
 - pass: True
 - expected: protocol_http, signature_directory_traversal, web_exploit_detection
-- retrieved: competition_TA01_02_exploit, protocol_http, signature_directory_traversal, web_exploit_detection, zeek_http_log_fields
+- retrieved: boundary_ta01_02_vs_tn01_01, competition_TA01_02_exploit, protocol_http, signature_directory_traversal, web_exploit_detection
 
 ## q010_command_injection_wget_curl_shell
 - pass: True
 - expected: protocol_http, signature_command_injection, web_exploit_detection
-- retrieved: competition_TA01_02_exploit, competition_TA11_01_backdoor_access, competition_boundary_TA43_02_vs_TA01_02, signature_command_injection, web_exploit_detection
+- retrieved: boundary_ta01_02_vs_tn01_01, competition_TA01_02_exploit, competition_TA11_01_backdoor_access, signature_command_injection, web_exploit_detection
 
 ## q011_dns_tunnel_long_domain
 - pass: True
@@ -62,12 +62,12 @@
 ## q012_periodic_tls_sni_beacon
 - pass: True
 - expected: normal_periodic_connection_vs_c2, protocol_tls_sni, signature_tls_c2
-- retrieved: competition_backdoor_implant_access_callback_boundary, competition_boundary_TA11_02_vs_TN01_01, normal_periodic_connection_vs_c2, protocol_tls_sni, signature_tls_c2
+- retrieved: boundary_ta11_02_vs_tn01_01, competition_boundary_TA11_02_vs_TN01_01, normal_periodic_connection_vs_c2, protocol_tls_sni, signature_tls_c2
 
 ## q013_ssh_brute_force_login_attempt
 - pass: True
 - expected: bruteforce_detection, protocol_ssh_ftp_rdp, signature_bruteforce
-- retrieved: bruteforce_detection, competition_TA01_01_bruteforce, competition_boundary_TA01_01_vs_TN01_01, competition_bruteforce_boundary, signature_bruteforce
+- retrieved: boundary_ta01_01_vs_tn01_01, bruteforce_detection, competition_TA01_01_bruteforce, competition_boundary_TA01_01_vs_TN01_01, competition_bruteforce_boundary
 
 ## q014_high_volume_possible_ddos
 - pass: True
@@ -78,3 +78,28 @@
 - pass: True
 - expected: normal_smb_vs_smb_exploit, protocol_smb, smb_exploit_detection
 - retrieved: exploit_detection, normal_smb_vs_smb_exploit, protocol_smb, signature_ms17_010_smb, smb_exploit_detection
+
+## q016_boundary_scan_vs_vuln_scan
+- pass: True
+- expected: boundary_ta43_01_vs_ta43_02
+- retrieved: boundary_ta43_01_vs_ta43_02, competition_TA43_01_port_scan, competition_TA43_02_vulnerability_scan, competition_boundary_TA43_01_vs_TA43_02, competition_port_scan_vs_vulnerability_scan
+
+## q017_boundary_bruteforce_vs_normal
+- pass: True
+- expected: boundary_ta01_01_vs_tn01_01
+- retrieved: boundary_ta01_01_vs_tn01_01, bruteforce_detection, competition_TA01_01_bruteforce, competition_boundary_TA01_01_vs_TN01_01, competition_bruteforce_boundary
+
+## q018_boundary_exploit_vs_normal
+- pass: True
+- expected: boundary_ta01_02_vs_tn01_01
+- retrieved: boundary_ta01_02_vs_tn01_01, competition_TA01_02_exploit, competition_TN01_01_normal_business, competition_boundary_TA11_02_vs_TN01_01, normal_http_vs_web_exploit
+
+## q019_boundary_backdoor_access_vs_callback
+- pass: True
+- expected: boundary_ta11_01_vs_ta11_02
+- retrieved: boundary_ta11_01_vs_ta11_02, competition_TA11_01_backdoor_access, competition_TA11_02_trojan_callback, competition_backdoor_implant_access_callback_boundary, competition_boundary_TA03_01_vs_TA11_01_vs_TA11_02
+
+## q020_boundary_callback_vs_normal
+- pass: True
+- expected: boundary_ta11_02_vs_tn01_01
+- retrieved: boundary_ta11_02_vs_tn01_01, competition_TN01_01_normal_business, competition_boundary_TA11_02_vs_TN01_01, competition_conservative_normal_vs_callback_boundary, competition_normal_business_traffic_boundary

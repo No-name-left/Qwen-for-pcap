@@ -4,14 +4,21 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
+if [ -f "$ROOT/.env" ]; then set -a; . "$ROOT/.env"; set +a; fi
+if [ -f "$ROOT/.env.local" ]; then set -a; . "$ROOT/.env.local"; set +a; fi
+
 PARSED_DIR="$ROOT/outputs/parsed"
 OUTPUT_ROOT="$ROOT/outputs"
 MAX_CARDS=0
+TASK_MODE=stage1
+RUNTIME_PROFILE="${RUNTIME_PROFILE:-ascend_openeuler_qwen35_27b}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --parsed-dir) PARSED_DIR="$2"; shift 2 ;;
     --output-root) OUTPUT_ROOT="$2"; shift 2 ;;
     --max-cards) MAX_CARDS="$2"; shift 2 ;;
+    --task-mode) TASK_MODE="$2"; shift 2 ;;
+    --runtime-profile) RUNTIME_PROFILE="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -45,13 +52,15 @@ python3 scripts/build_qwen35_session_prompts.py \
   --records "$SESSION_DIR/classification_records_all.json" \
   --retrieval "$RETRIEVAL_DIR/qwen35_session_records_retrieved_knowledge_top5.json" \
   --micro-output-dir "$OUTPUT_ROOT" \
-  --report "$OUTPUT_ROOT/prompts_qwen35_technique_prompt_report.md"
+  --report "$OUTPUT_ROOT/prompts_qwen35_technique_prompt_report.md" \
+  --runtime-profile "$RUNTIME_PROFILE"
 python3 scripts/export_competition_csv.py \
   --records "$SESSION_DIR/classification_records_all.json" \
+  --task-mode "$TASK_MODE" \
   --stage-output "$SUBMISSION_DIR/stage1_submission.csv" \
   --technique-output "$SUBMISSION_DIR/stage2_submission.csv" \
   --report "$SUBMISSION_DIR/submission_export_report.md" \
   --dry-run
 
-echo "stage1 offline pipeline complete; no model API was called"
+echo "$TASK_MODE offline pipeline complete with runtime profile $RUNTIME_PROFILE; no model API was called"
 echo "run scripts/run_qwen_openai_compatible.py explicitly with a reviewed technique prompt directory to call an API"

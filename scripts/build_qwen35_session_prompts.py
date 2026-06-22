@@ -6,10 +6,28 @@ import json
 from pathlib import Path
 from typing import Any
 
-from qwen35_rag_utils import REAL_MICRO_DIR, ROOT, load_json
+from qwen35_rag_utils import (
+    DEFAULT_RUNTIME_PROFILES,
+    REAL_MICRO_DIR,
+    ROOT,
+    estimate_tokens,
+    load_env_file,
+    load_json,
+    load_runtime_profile,
+)
 
 
+PROMPT_VERSION = "boundary_rag_v2"
 TECHNIQUE_CODES = ["TA43_01", "TA43_02", "TA01_01", "TA01_02", "TA03_01", "TA11_01", "TA11_02", "TN01_01"]
+CORE_KEYS = [
+    "record_id", "session_id", "pcap", "pcap_id", "record_type", "parser_source",
+    "start_time", "end_time", "src_ip", "src_port", "dst_ip", "dst_port", "proto",
+    "service", "duration", "orig_pkts", "resp_pkts", "orig_bytes", "resp_bytes",
+    "conn_state", "history", "same_src_conn_count", "same_src_unique_dst_ports",
+    "same_src_unique_dst_ips", "same_src_failed_conn_rate", "same_dst_unique_src_count",
+    "same_src_same_dst_port_count", "session_count", "unique_dst_ports", "failed_conn_rate",
+    "time_window_neighbor_alert_count", "src_role", "dst_role", "initiator_role", "direction",
+]
 
 
 def load_retrieval(path: Path) -> dict[str, list[dict[str, Any]]]:
@@ -29,97 +47,143 @@ def display_path(path: Path) -> str:
     return str(path)
 
 
-def compact_record(record: dict[str, Any]) -> dict[str, Any]:
-    keys = [
-        "record_id",
-        "session_id",
-        "pcap_id",
-        "record_type",
-        "parser_source",
-        "start_time",
-        "end_time",
-        "src_ip",
-        "src_port",
-        "dst_ip",
-        "dst_port",
-        "proto",
-        "service",
-        "duration",
-        "orig_pkts",
-        "resp_pkts",
-        "orig_bytes",
-        "resp_bytes",
-        "conn_state",
-        "history",
-        "http_summary",
-        "dns_summary",
-        "tls_summary",
-        "same_src_conn_count",
-        "same_src_unique_dst_ports",
-        "same_src_unique_dst_ips",
-        "same_src_failed_conn_rate",
-        "same_dst_unique_src_count",
-        "same_src_same_dst_port_count",
-        "session_count",
-        "unique_dst_ports",
-        "dst_ports_sample",
-        "failed_conn_rate",
-    ]
-    return {key: record.get(key) for key in keys if key in record}
+def trim_value(value: Any, char_limit: int, list_limit: int = 12) -> Any:
+    if isinstance(value, str):
+        return value if len(value) <= char_limit else value[: max(0, char_limit - 15)] + "...[truncated]"
+    if isinstance(value, list):
+        output = [trim_value(item, max(80, char_limit // max(1, min(len(value), list_limit)))) for item in value[:list_limit]]
+        if len(value) > list_limit:
+            output.append(f"...[{len(value) - list_limit} more]")
+        return output
+    if isinstance(value, dict):
+        return {str(key): trim_value(item, max(80, char_limit // max(1, len(value)))) for key, item in value.items()}
+    return value
 
 
-def prompt_text(record: dict[str, Any], task: str, snippets: list[dict[str, Any]] | None) -> str:
-    if task != "technique":
-        raise ValueError("only technique classification prompts are supported; stage_code is derived deterministically")
-    allowed = TECHNIQUE_CODES
-    rag_block = ""
-    if snippets is not None:
-        trimmed = [
-            {
-                "doc_id": s.get("doc_id"),
-                "title": s.get("title"),
-                "score": s.get("score"),
-                "text": s.get("text"),
-            }
-            for s in snippets[:5]
-        ]
-        rag_block = "\nRAG_TOP5_SNIPPETS:\n" + json.dumps(trimmed, ensure_ascii=False, indent=2)
+def compact_record(record: dict[str, Any], max_chars: int = 4500) -> dict[str, Any]:
+    compact = {key: record.get(key) for key in CORE_KEYS if key in record}
+    remaining = max(240, max_chars - len(json.dumps(compact, ensure_ascii=False)))
+    for key in (
+        "http_summary", "dns_summary", "tls_summary", "file_summary", "notice_summary",
+        "weird_summary", "alert_summary", "pcap_summary", "same_pcap_summary", "related_context",
+    ):
+        if key in record and record.get(key) not in (None, "", [], {}):
+            compact[key] = trim_value(record[key], min(900, remaining))
+            remaining = max(120, max_chars - len(json.dumps(compact, ensure_ascii=False)))
+    if "dst_ports_sample" in record:
+        compact["dst_ports_sample"] = trim_value(record["dst_ports_sample"], 400, list_limit=20)
+    return compact
+
+
+def instruction_block() -> str:
     return (
-        "You are classifying one PCAP network-flow classification record for a security competition.\n"
-        "Predict technique_code only. Never predict or output stage_code; the program derives it deterministically.\n"
-        "Return exactly one JSON object. Do not output Markdown, a Thinking Process, or any text outside the JSON object.\n"
-        "Do not use IP/domain reputation. Do not use context from other PCAP files. Do not output legacy labels.\n"
-        "Evidence-first policy: classify from CLASSIFICATION_RECORD first; use RAG only to clarify official-code boundaries.\n"
-        "If record evidence is weak, ambiguous, or ordinary background/business traffic, choose TN01_01.\n"
-        "Do not classify C2 or exploit from DNS/NBNS, short connections, generic outbound traffic, or a single weak feature alone.\n"
-        "However, do not overuse TN01_01 when multiple strong fields jointly indicate attack behavior, such as many outbound connections from one source, high failed-connection context, repeated callback-like services, or scan_group fanout.\n"
-        "Prefer TA43_01 only for multi-port fanout/SYN or failed-connection scan evidence; prefer TA43_02 for service-specific vulnerability probing without exploit payload.\n"
-        "Prefer TA01_02 only when exploit payload, CVE attempt, command injection, SQL/XSS payload, or abnormal exploit response evidence exists.\n"
-        "Use TA11_02 for compromised-host outbound callback/beacon evidence; TA11_01 for operator access to an existing backdoor; TA03_01 for installation/persistence/dropper evidence.\n"
-        f"Allowed technique_code values: {', '.join(allowed)}. Choose exactly one of these eight values.\n"
-        "The JSON object must contain exactly these fields:\n"
-        "{\n"
-        '  "record_id": string,\n'
-        '  "pcap_id": string,\n'
-        '  "record_type": "session", "scan_group", or "flow_only",\n'
-        '  "start_time": number or null,\n'
-        '  "end_time": number or null,\n'
-        '  "src_ip": string or null,\n'
-        '  "src_port": number/string/null,\n'
-        '  "dst_ip": string or null,\n'
-        '  "dst_port": number/string/null,\n'
-        f'  "predicted_code": one of {allowed},\n'
-        '  "confidence": number between 0 and 1,\n'
-        '  "reason": one short sentence\n'
-        "}\n"
-        "For weak or ambiguous evidence, use the normal code.\n"
-        f"{rag_block}\n"
-        "CLASSIFICATION_RECORD:\n"
-        f"{json.dumps(compact_record(record), ensure_ascii=False, indent=2)}\n"
+        f"PROMPT_VERSION: {PROMPT_VERSION}\n"
+        "Classify exactly one PCAP session/scan_group into the official closed set. Predict technique_code only; stage_code is derived by the program.\n"
+        "Return exactly one JSON object and no Markdown, Thinking Process, or text outside JSON.\n"
+        "The record is primary evidence. RAG is boundary guidance only; when RAG conflicts with observed behavior, follow the record.\n"
+        "Use only this record and same-PCAP aggregates. Never use IP/domain reputation or context from another PCAP.\n"
+        "Missing payload is not proof of normality. Encrypted traffic is not normal by default; judge direction, repetition, timing, fanout, failures, bytes, and endpoint role.\n"
+        "If evidence remains insufficient after behavioral review, TN01_01 is allowed. Ordinary HTTP/TLS/DNS or a few normal logins are not attacks.\n"
+        "TA43_01 needs port/target fanout or short failed discovery; do not upgrade ordinary port scans to TA43_02. TA43_02 needs service fingerprinting, scanner paths/plugins, CVE or vulnerability-specific probes.\n"
+        "TA01_01 needs repeated authentication attempts with failure/credential evidence. TA01_02 needs exploit payload, abnormal URI, injection, traversal, webshell upload, or vulnerability-trigger evidence.\n"
+        "TA03_01 is deployment/persistence. TA11_01 is attacker-initiated access to an existing backdoor or interactive control entry. TA11_02 is victim-initiated callback/beacon/C2 behavior.\n"
+        f"Allowed technique_code values: {', '.join(TECHNIQUE_CODES)}. No legacy or invented labels.\n"
+        "Required JSON fields: record_id, pcap_id, record_type, start_time, end_time, src_ip, src_port, dst_ip, dst_port, predicted_code, confidence, reason.\n"
+        "confidence must be 0..1 and reason must be one short sentence.\n"
     )
 
 
-def write_prompt_set(records: list[dict[str, Any]], out_dir: Path, task: str, retrieval: dict[str, list[dict[str, Any]]] | None) -> int:
+def rag_section(snippets: list[dict[str, Any]], profile: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    max_chunks = int(profile.get("max_rag_chunks", 5))
+    per_chunk = int(profile.get("max_rag_chars_per_chunk", 550))
+    ordered = sorted(snippets, key=lambda item: (not bool(item.get("targeted_boundary")), -float(item.get("score") or 0)))
+    selected = ordered[:max_chunks]
+    payload = []
+    for item in selected:
+        payload.append({
+            "doc_id": item.get("doc_id"),
+            "targeted_boundary": bool(item.get("targeted_boundary")),
+            "text": trim_value(str(item.get("text") or ""), per_chunk),
+        })
+    block = "" if not payload else "RAG_BOUNDARY_AND_TOP_EVIDENCE:\n" + json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+    return block, {
+        "rag_chunks_included": len(payload),
+        "targeted_boundary_doc_ids": [item["doc_id"] for item in payload if item["targeted_boundary"]],
+    }
+
+
+def build_prompt(
+    record: dict[str, Any],
+    task: str,
+    snippets: list[dict[str, Any]] | None,
+    profile: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    if task != "technique":
+        raise ValueError("only technique classification prompts are supported; stage_code is derived deterministically")
+    configured_chars = int(profile.get("max_prompt_chars", 10**9))
+    token_chars = int(profile.get("max_prompt_tokens", 3500)) * 3
+    max_chars = min(configured_chars, token_chars)
+    session_limit = int(profile.get("max_session_context_chars", 4500))
+    record_json = json.dumps(compact_record(record, session_limit), ensure_ascii=False, separators=(",", ":"))
+    prefix = instruction_block()
+    rag_block, meta = rag_section(snippets or [], profile) if snippets is not None else ("", {"rag_chunks_included": 0, "targeted_boundary_doc_ids": []})
+    suffix = "CLASSIFICATION_RECORD:\n" + record_json + "\n"
+    prompt = prefix + rag_block + suffix
+    truncated = "[truncated]" in record_json or " more]" in record_json
+    if len(prompt) > max_chars and rag_block:
+        # Drop lowest-ranked ordinary RAG before any decision-boundary card.
+        working = list(snippets or [])
+        while len(prompt) > max_chars and any(not item.get("targeted_boundary") for item in working):
+            for index in range(len(working) - 1, -1, -1):
+                if not working[index].get("targeted_boundary"):
+                    working.pop(index)
+                    break
+            rag_block, meta = rag_section(working, profile)
+            prompt = prefix + rag_block + suffix
+            truncated = True
+    if len(prompt) > max_chars:
+        # Preserve schema/instructions and core fields; shorten verbose application summaries.
+        available = max(800, max_chars - len(prefix) - len(rag_block) - len("CLASSIFICATION_RECORD:\n\n"))
+        record_json = json.dumps(compact_record(record, min(session_limit, available)), ensure_ascii=False, separators=(",", ":"))
+        suffix = "CLASSIFICATION_RECORD:\n" + record_json + "\n"
+        prompt = prefix + rag_block + suffix
+        truncated = True
+    if len(prompt) > max_chars and rag_block:
+        # A pathological record may force all RAG out; the current record always wins.
+        rag_block = ""
+        meta = {"rag_chunks_included": 0, "targeted_boundary_doc_ids": [], "boundary_dropped_for_core_record": True}
+        prompt = prefix + suffix
+        truncated = True
+    if len(prompt) > max_chars:
+        raise ValueError(f"core prompt exceeds profile budget: {len(prompt)} > {max_chars}")
+    meta.update({
+        "prompt_version": PROMPT_VERSION,
+        "runtime_profile": profile.get("name", "inline"),
+        "prompt_chars": len(prompt),
+        "estimated_prompt_tokens": estimate_tokens(prompt),
+        "max_prompt_chars": max_chars,
+        "budget_truncated": truncated,
+    })
+    return prompt, meta
+
+
+def prompt_text(
+    record: dict[str, Any],
+    task: str,
+    snippets: list[dict[str, Any]] | None,
+    profile: dict[str, Any] | None = None,
+) -> str:
+    effective = profile or {
+        "name": "compat_default", "max_prompt_chars": 11000, "max_rag_chunks": 5,
+        "max_rag_chars_per_chunk": 550, "max_session_context_chars": 4500,
+    }
+    return build_prompt(record, task, snippets, effective)[0]
+
+
+def write_prompt_set(
+    records: list[dict[str, Any]], out_dir: Path, task: str,
+    retrieval: dict[str, list[dict[str, Any]]] | None, profile: dict[str, Any],
+) -> tuple[int, list[dict[str, Any]]]:
     out_dir.mkdir(parents=True, exist_ok=True)
     for old_prompt in out_dir.glob("*.txt"):
         old_prompt.unlink()
@@ -127,52 +191,48 @@ def write_prompt_set(records: list[dict[str, Any]], out_dir: Path, task: str, re
     for record in records:
         record_id = record["record_id"]
         snippets = retrieval.get(record_id, []) if retrieval is not None else None
+        text, metadata = build_prompt(record, task, snippets, profile)
         path = out_dir / f"{record_id.replace('/', '_').replace(':', '_')}.txt"
-        path.write_text(prompt_text(record, task, snippets), encoding="utf-8")
-        manifest.append({"record_id": record_id, "prompt_file": display_path(path)})
+        path.write_text(text, encoding="utf-8")
+        manifest.append({"record_id": record_id, "prompt_file": display_path(path), **metadata})
     (out_dir / "prompt_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return len(manifest)
+    return len(manifest), manifest
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build Qwen3.5-27B session-level official-code prompts without calling an API.")
+    parser = argparse.ArgumentParser(description="Build budgeted Qwen session prompts without calling an API.")
     parser.add_argument("--records", type=Path, default=ROOT / "outputs/session_cards/classification_records_all.json")
     parser.add_argument("--retrieval", type=Path, default=ROOT / "outputs/rag_retrieval/qwen35_session_records_retrieved_knowledge_top5.json")
     parser.add_argument("--micro-output-dir", type=Path, default=REAL_MICRO_DIR / "outputs")
     parser.add_argument("--report", type=Path, default=REAL_MICRO_DIR / "outputs/prompts_qwen35_27b_prompt_report.md")
+    parser.add_argument("--runtime-profiles", type=Path, default=DEFAULT_RUNTIME_PROFILES)
+    parser.add_argument("--runtime-profile", default="ascend_openeuler_qwen35_27b")
     args = parser.parse_args()
 
+    load_env_file(ROOT / ".env")
+    load_env_file(ROOT / ".env.local")
     records = load_json(args.records) if args.records.exists() else []
     retrieval = load_retrieval(args.retrieval)
-    counts = {
-        "prompts_qwen35_27b_technique_no_rag": write_prompt_set(records, args.micro_output_dir / "prompts_qwen35_27b_technique_no_rag", "technique", None),
-        "prompts_qwen35_27b_technique_rag": write_prompt_set(records, args.micro_output_dir / "prompts_qwen35_27b_technique_rag", "technique", retrieval),
-    }
-
+    profile = load_runtime_profile(args.runtime_profile, args.runtime_profiles)
+    no_count, no_manifest = write_prompt_set(records, args.micro_output_dir / "prompts_qwen35_27b_technique_no_rag", "technique", None, profile)
+    rag_count, rag_manifest = write_prompt_set(records, args.micro_output_dir / "prompts_qwen35_27b_technique_rag", "technique", retrieval, profile)
+    all_rows = no_manifest + rag_manifest
+    max_chars = max((row["prompt_chars"] for row in all_rows), default=0)
+    max_tokens = max((row["estimated_prompt_tokens"] for row in all_rows), default=0)
+    targeted = sum(bool(row["targeted_boundary_doc_ids"]) for row in rag_manifest)
     args.report.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# Qwen3.5-27B prompt generation report",
-        "",
-        f"- Input classification records: `{display_path(args.records)}`",
-        f"- Records: {len(records)}",
-        f"- Retrieval input: `{display_path(args.retrieval)}`",
-        "- API calls: none",
-        "",
-        "## Prompt sets",
-        "",
+        "# Qwen3.5 prompt budget report", "",
+        f"- Prompt version: `{PROMPT_VERSION}`", f"- Runtime profile: `{args.runtime_profile}`",
+        f"- Records: {len(records)}", f"- No-RAG prompts: {no_count}", f"- RAG prompts: {rag_count}",
+        f"- RAG prompts with targeted boundary cards: {targeted}",
+        f"- Maximum prompt characters: {max_chars} / {profile.get('max_prompt_chars')}",
+        f"- Maximum estimated prompt tokens: {max_tokens} / {profile.get('max_prompt_tokens')}",
+        f"- Budget truncations: {sum(bool(row['budget_truncated']) for row in all_rows)}", "",
+        "Prompts preserve closed-set definitions and the current record before ordinary RAG. Stage codes are never model-predicted.",
     ]
-    lines.extend(f"- {name}: {count}" for name, count in counts.items())
-    lines.extend([
-        "",
-        "## Output constraints",
-        "",
-        "- Technique prompts allow only `TA43_01`, `TA43_02`, `TA01_01`, `TA01_02`, `TA03_01`, `TA11_01`, `TA11_02`, `TN01_01`.",
-        "- No stage prompts are generated; stage codes are derived deterministically from technique codes.",
-        "- RAG prompt sets inject top-5 retrieved snippets.",
-        "- The requested result JSON uses `predicted_code`, `confidence`, and one-sentence `reason`.",
-    ])
     args.report.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"built prompts for {len(records)} records")
+    print(f"built prompts for {len(records)} records; max_chars={max_chars}; prompt_version={PROMPT_VERSION}")
     return 0
 
 

@@ -1,20 +1,20 @@
 # Official technique coverage matrix
 
-Updated: 2026-06-22. “High” means the public source label is a close semantic match; it does not mean official competition ground truth.
+Updated: 2026-06-22. Confidence describes semantic label alignment, not competition ground truth. PCAP/session-derived and flow-only counts are never pooled.
 
-| Technique | Existing high-confidence source | Medium candidate | Low/manual candidate | PCAP | Flow label | Train | Test | Current gap |
-|---|---|---|---|---|---|---|---|---|
-| `TA43_01` port scan | Controlled Nmap `scan_group` | UNSW Reconnaissance; IoT-23 horizontal scan | CSE infiltration sweep after time alignment | Yes | Partial | Controlled only | Yes, with source split | More diverse public PCAP scans and negative service-probing cases. |
-| `TA43_02` vulnerability scan | None | BoT-IoT Service Scan; Nmap NSE/Nikto/OpenVAS if manually generated | UNSW Analysis; CSE service enumeration | No current trusted PCAP | Candidate only | No | Boundary eval only | No perfect public label; service enumeration must not be forced to high confidence. |
-| `TA01_01` password brute force | CSE-CIC-IDS2018 FTP/SSH brute force flow rows | CIC web brute-force variants | None | No current labeled PCAP | Yes | Yes, flow-only | Yes, reported separately | Add PCAP-aligned Patator/brute-force sessions. |
-| `TA01_02` vulnerability exploitation | UNSW Exploits candidate after acquisition; CIC Heartbleed candidate | CSE SQL Injection/XSS flow rows; ToN-IoT web attacks | Generic fuzzing without payload confirmation | Not local | Yes | High only after source acquisition | Medium boundary eval now | Need raw packet/payload-aligned exploit sessions. |
-| `TA03_01` implant backdoor | None | CSE infiltration only after timeline/manual evidence | UNSW Shellcode/Backdoors; MCF host narrative | No | Broad scenario only | No | Manual only | Network evidence rarely proves installation; requires curated timeline/packet evidence. |
-| `TA11_01` access backdoor | None | Manually confirmed operator-to-implant sessions | CSE infiltration; UNSW Backdoors category | No | Broad scenario only | No | Manual only | Must establish direction and existing-backdoor context; family labels are insufficient. |
-| `TA11_02` trojan callback | CTU-13 botnet-only PCAP plus `From-Botnet*` labels | CSE Bot flow rows; IoT-23 C&C; verified MCF/MTA sessions | Generic Bot/Mirai/Backdoors categories | Yes | Yes | CTU high-confidence subset | Yes; flow-only separate | Add multiple malware families and benign callback-like negatives. |
-| `TN01_01` normal business | CSE Benign flow rows; CTU `From-Normal*` | IoT-23 benign captures; UNSW Normal | CTU `Background*` | Partial | Yes | Explicit normal only | Yes; source-aware | Add diverse real business PCAP; avoid treating unlabeled background as clean normal. |
+| Technique | Locally available sources | Confidence and evidence type | Current eval count | Strict test readiness | Training policy | Gap / next acquisition |
+|---|---|---|---:|---|---|---|
+| `TA43_01` port scan | Controlled local Nmap PCAP → Zeek `scan_group`; catalogued CIC/BoT-IoT/ToN-IoT candidates not local | high controlled PCAP/session-derived | 1 high scan_group | No: below 20 and one controlled environment | Boundary/format smoke only; one record cannot train a class | Add diverse Nmap TCP/UDP scans and benign/vulnerability-probe negatives. |
+| `TA43_02` vulnerability scan | No runnable record; BoT-IoT Service Scan, UNSW Analysis, CSE service enumeration are only candidates | medium/low flow candidate; no trusted PCAP | 0 | No | Do not train | Curate small Nikto/OpenVAS/Nmap NSE/service-enumeration PCAPs with explicit command/timeline labels. |
+| `TA01_01` password brute force | CSE-CIC-IDS2018 FTP/SSH brute-force CSV | high label, flow-only | 5 high flow-only | No: below 20 and no session-derived set | Can help reviewed format/boundary tuning only; keep flow domain explicit | Add PCAP-aligned Patator/SSH/FTP attempts plus successful/low-retry negatives. |
+| `TA01_02` vulnerability exploitation | CSE-CIC-IDS2018 SQL Injection/XSS CSV; UNSW/CIC Heartbleed only catalogued | current rows medium, flow-only | 5 medium flow-only | No high-confidence test rows | Do not use current medium rows as strong supervision | Acquire payload-visible, PCAP-aligned exploit attempts and ordinary Web negatives. |
+| `TA03_01` backdoor implantation | No runnable record; CIC infiltration/UNSW backdoor-family narratives are low candidates | low/manual; phase not established | 0 | No | Never train from broad infiltration/family labels | Curate webshell upload, payload download, backdoor deployment and post-exploit persistence timelines. |
+| `TA11_01` backdoor access | No runnable record; infiltration/backdoor-family candidates lack direction and phase | low/manual | 0 | No | Never train without existing-backdoor and operator-access evidence | Curate attacker-to-backdoor/webshell access, interactive reverse-shell and post-backdoor sessions. |
+| `TA11_02` trojan callback | Four CTU-13 PCAPs with matching binetflow/README; CSE Bot flow rows | CTU high PCAP/session-derived; CSE medium flow-only | 3 high sessions + 2 medium flow-only | No: only 3 high session records in current holdout | 57 separately audited high CTU candidates may cautiously teach format/behavior, but do not imply eight-class readiness | Add malware-family diversity and benign periodic HTTPS/DNS negatives. |
+| `TN01_01` normal business | CSE benign CSV; CTU `From-Normal*` companion labels; background excluded | CSE high flow-only; CTU normal candidate requires session split | 4 high flow-only | No: below 20 and no current high session holdout | Reviewed explicit normal only; never promote CTU `Background*` | Add diverse benign PCAP sessions, normal login/Web/TLS/DNS and periodic service traffic. |
 
-## Coverage conclusion
+## Readiness conclusion
 
-- All eight codes have at least a candidate source recorded.
-- Locally runnable high/medium evaluation currently covers five codes: `TA43_01`, `TA01_01`, `TA01_02`, `TA11_02`, `TN01_01`.
-- `TA43_02`, `TA03_01`, and `TA11_01` remain explicit gaps; they are not filled with synthetic high-confidence labels.
+- Strict high-confidence test: **not ready for any class at the preferred 20-record threshold**. `TA43_01` and `TA11_02` have high PCAP/session-derived evidence, but only 1 and 3 holdout records. `TA01_01` and `TN01_01` have only 5 and 4 high flow-only rows and must be reported separately.
+- SFT/LoRA: **not ready as a balanced eight-class set**. The reviewed inventory has 57 `accept_high` records, all `TA11_02`; the remaining accepted rows are medium and need review. It is acceptable to use carefully reviewed samples for JSON/schema and boundary behavior experiments, with domain/provenance fields retained, but not as broad security-knowledge supervision.
+- `TA43_02`, `TA03_01`, and `TA11_01` remain deliberate gaps. No low-confidence mapping was upgraded to close them.

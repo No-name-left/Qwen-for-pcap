@@ -10,6 +10,15 @@ from typing import Any
 from qwen35_rag_utils import ROOT, load_json
 
 
+BOUNDARY_DOCS = {
+    "ta43_01_vs_ta43_02": "boundary_ta43_01_vs_ta43_02",
+    "ta01_01_vs_tn01_01": "boundary_ta01_01_vs_tn01_01",
+    "ta01_02_vs_tn01_01": "boundary_ta01_02_vs_tn01_01",
+    "ta11_01_vs_ta11_02": "boundary_ta11_01_vs_ta11_02",
+    "ta11_02_vs_tn01_01": "boundary_ta11_02_vs_tn01_01",
+}
+
+
 def add_term(terms: list[str], value: Any) -> None:
     if value is None:
         return
@@ -54,6 +63,53 @@ def display_path(path: Path) -> str:
         return str(resolved.relative_to(ROOT))
     except ValueError:
         return str(path)
+
+
+def detect_confusion_groups(record: dict[str, Any]) -> list[str]:
+    """Select short decision cards from observable record features only."""
+    excluded = {"record_id", "session_id", "pcap_id", "pcap", "flow_source", "source_file", "parser_source"}
+    signals = {key: value for key, value in record.items() if key not in excluded}
+    blob = json.dumps(signals, ensure_ascii=False).lower()
+    tokens = set(re.findall(r"[a-z0-9_+-]+", blob))
+    service = str(record.get("service") or "").lower()
+    try:
+        dst_port = int(record.get("dst_port"))
+    except (TypeError, ValueError):
+        dst_port = 0
+    groups: list[str] = []
+    many_ports = max(
+        as_number(record.get("same_src_unique_dst_ports")),
+        as_number(record.get("unique_dst_ports")),
+    ) >= 8
+    scan_tokens = {"scan", "scanner", "nikto", "openvas", "nessus", "nmap"}
+    if record.get("record_type") == "scan_group" or many_ports or bool(tokens & scan_tokens) or any(word in blob for word in ("service enumeration", "version probe")):
+        groups.append("ta43_01_vs_ta43_02")
+
+    auth_service = service in {"ssh", "ftp", "rdp", "smb", "smb2", "kerberos", "ldap"} or dst_port in {21, 22, 23, 445, 3389}
+    repeated = max(
+        as_number(record.get("same_src_same_dst_port_count")),
+        as_number(record.get("same_src_conn_count")),
+    ) >= 5
+    auth_words = ("login", "authentication", "password", "bruteforce", "brute force", "patator")
+    if auth_service or repeated and any(proto in blob for proto in ("ssh", "ftp", "rdp", "login")) or any(word in blob for word in auth_words):
+        groups.append("ta01_01_vs_tn01_01")
+
+    web_context = service in {"http", "https", "ssl", "tls"} or dst_port in {80, 443, 8000, 8080, 8443} or bool(record.get("http_summary"))
+    exploit_words = ("exploit", "cve-", "command injection", "sql injection", "xss", "../", "webshell", "payload")
+    if web_context or any(word in blob for word in exploit_words):
+        groups.append("ta01_02_vs_tn01_01")
+
+    access_words = ("backdoor access", "webshell", "reverse shell", "interactive shell", "operator", "shell command")
+    callback_words = ("callback", "beacon", "checkin", "botnet")
+    has_access = any(word in blob for word in access_words)
+    has_callback = any(word in blob for word in callback_words) or bool(tokens & {"c2", "cnc", "rat"})
+    if has_access or has_callback:
+        groups.append("ta11_01_vs_ta11_02")
+
+    outbound_context = service in {"dns", "http", "https", "ssl", "tls"} or bool(record.get("dns_summary")) or bool(record.get("tls_summary"))
+    if has_callback or outbound_context:
+        groups.append("ta11_02_vs_tn01_01")
+    return dedupe(groups)
 
 
 def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
@@ -115,6 +171,10 @@ def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
         terms.extend(["normal business", "weak-only signal", "TN01_01"])
         rules.append("default_boundary:TN01_01")
 
+    confusion_groups = detect_confusion_groups(record)
+    for group in confusion_groups:
+        terms.extend([group, BOUNDARY_DOCS[group]])
+        rules.append(f"confusion_boundary:{group}")
     return dedupe(terms), rules, low_signal
 
 
@@ -132,6 +192,7 @@ def main() -> int:
         for record in records:
             record_id = record.get("record_id") or record.get("event_id")
             terms, rules, low_signal = record_terms(record)
+            confusion_groups = detect_confusion_groups(record)
             row = {
                 "record_id": record_id,
                 "query_id": record_id,
@@ -140,6 +201,8 @@ def main() -> int:
                 "query": " ".join(terms[:100]),
                 "query_terms": terms,
                 "matched_rules": rules,
+                "confusion_groups": confusion_groups,
+                "targeted_boundary_doc_ids": [BOUNDARY_DOCS[group] for group in confusion_groups],
                 "low_signal": low_signal,
             }
             rows.append(row)
@@ -159,6 +222,7 @@ def main() -> int:
         "- Query IDs use `record_id`.",
         "- `session` and `scan_group` records are handled separately.",
         "- Query expansion includes official code candidates.",
+        "- Confusion groups are feature-triggered and name targeted decision-boundary documents.",
         "- Expected labels are not read and no LLM is used.",
     ]
     args.report.parent.mkdir(parents=True, exist_ok=True)

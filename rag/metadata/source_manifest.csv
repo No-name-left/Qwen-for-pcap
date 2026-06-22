@@ -1,4 +1,5 @@
 source_id,source_name,source_type,usage,notes
+src_competition_decision_boundaries,Competition closed-set decision boundaries,project_distilled,Feature-triggered prompt boundary cards,Derived from official label definitions and project error analysis; contains no evaluation answers or record labels.
 src_avast_doublepulsar,Avast DoublePulsar infection article,public_reference,Backup grounding for DoublePulsar infection behavior.,Reference: https://support.avast.com/en-ww/article/hns-doublepulsar-infection/. Used for general source grounding only.
 src_deprecated_cisa_smb_doublepulsar,Deprecated CISA SMB/DOUBLEPULSAR URL,deprecated_failed_reference,Records previously failed CISA URL for audit continuity.,"Failed/deprecated; replaced by NHS Digital, Help Net Security, ExtraHop, and Microsoft MS17-010 references."
 src_deprecated_malpedia_win_strrat,Deprecated Malpedia STRRAT win.strrat,deprecated_failed_reference,Records previously failed STRRAT URL for audit continuity.,Failed/deprecated; replaced by https://malpedia.caad.fkie.fraunhofer.de/details/jar.strrat and backup public sources.

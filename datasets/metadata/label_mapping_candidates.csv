@@ -46,3 +46,9 @@ cic_iot2023,SqlInjection / CommandInjection / XSS,TA01_02,medium,Explicit web at
 cic_iot2023,Mirai-greeth_flood / Mirai-udpplain,TA11_02,low,Mirai attack traffic is not necessarily callback/C2,manual_only,true
 cic_iot2023,BenignTraffic,TN01_01,high,Official benign category,test|train|rag_prompt_eval,false
 malware_traffic_analysis,manually verified infection C2 session,TA11_02,high,Answer key plus analyst-confirmed session direction,test|rag_prompt_eval,true
+controlled_vuln_scan,Nikto or OpenVAS explicit vulnerability scan,TA43_02,medium,Becomes high only after command log timeline and PCAP are reviewed; generic web requests are insufficient,acquisition_candidate|rag_prompt_eval,true
+controlled_vuln_scan,Nmap NSE vulnerability scripts plus service enumeration,TA43_02,medium,Require vulnerability-specific NSE or fingerprint probes; plain multi-port Nmap remains TA43_01,acquisition_candidate|rag_prompt_eval,true
+curated_post_exploit,webshell upload or backdoor payload deployment,TA03_01,medium,Require packet-visible transfer or deployment evidence aligned to a controlled timeline,acquisition_candidate|manual_only,true
+curated_post_exploit,payload download followed by persistence action,TA03_01,medium,Download alone is not installation; require post-exploit persistence context,acquisition_candidate|manual_only,true
+curated_backdoor_access,attacker connects to existing webshell or backdoor,TA11_01,medium,Require attacker-initiated direction and existing-backdoor context,acquisition_candidate|rag_prompt_eval,true
+curated_backdoor_access,interactive reverse-shell or post-backdoor operator session,TA11_01,medium,Require interactive control evidence and distinguish victim callback setup from operator access,acquisition_candidate|rag_prompt_eval,true

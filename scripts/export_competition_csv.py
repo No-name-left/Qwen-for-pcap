@@ -12,15 +12,13 @@ from qwen35_rag_utils import ROOT, load_json
 
 TECHNIQUE_CODES = {"TA43_01", "TA43_02", "TA01_01", "TA01_02", "TA03_01", "TA11_01", "TA11_02", "TN01_01"}
 TECHNIQUE_TO_STAGE = {
-    "TA43_01": "TA43",
-    "TA43_02": "TA43",
-    "TA01_01": "TA01",
-    "TA01_02": "TA01",
-    "TA03_01": "TA03",
-    "TA11_01": "TA11",
-    "TA11_02": "TA11",
-    "TN01_01": "TN01",
+    "TA43_01": "TA43", "TA43_02": "TA43", "TA01_01": "TA01", "TA01_02": "TA01",
+    "TA03_01": "TA03", "TA11_01": "TA11", "TA11_02": "TA11", "TN01_01": "TN01",
 }
+COMMON_FIELDS = ["pcap", "编号", "开始时间", "结束时间", "源IP", "源端口", "目的IP", "目的端口"]
+REASON_FIELD = "研判理由（不计入评分）"
+STAGE_LABEL_FIELD = "攻击阶段编号或正常流量编号"
+TECHNIQUE_LABEL_FIELD = "攻击技术编号或正常流量编号"
 
 
 def load_results(path: Path) -> list[dict[str, Any]]:
@@ -42,8 +40,8 @@ def result_map(results: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 
 def write_csv(path: Path, fieldnames: list[str], rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -55,101 +53,103 @@ def display_path(path: Path) -> str:
         return str(path)
 
 
+def first_present(record: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if record.get(key) not in (None, ""):
+            return record[key]
+    return ""
+
+
+def stable_pcap_name(record: dict[str, Any]) -> str:
+    value = first_present(record, "pcap", "pcap_file", "pcap_filename", "source_pcap", "original_pcap", "pcap_id")
+    if isinstance(value, str) and ("/" in value or "\\" in value):
+        return Path(value).name
+    return str(value)
+
+
+def official_row(record: dict[str, Any], result: dict[str, Any], code: str, label_field: str) -> dict[str, Any]:
+    rid = str(first_present(record, "record_id", "session_id"))
+    number = first_present(record, "编号", "number", "session_id", "record_id") or rid
+    reason = result.get("reason") or record.get("reason") or ""
+    return {
+        "pcap": stable_pcap_name(record),
+        "编号": number,
+        "开始时间": first_present(record, "start_time", "开始时间"),
+        "结束时间": first_present(record, "end_time", "结束时间"),
+        "源IP": first_present(record, "src_ip", "源IP"),
+        "源端口": first_present(record, "src_port", "源端口"),
+        "目的IP": first_present(record, "dst_ip", "目的IP"),
+        "目的端口": first_present(record, "dst_port", "目的端口"),
+        label_field: code,
+        REASON_FIELD: reason,
+    }
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Export official competition CSV files from model results or dry-run records.")
+    parser = argparse.ArgumentParser(description="Export stage1 or stage2 official-layout CSV from technique-first results.")
     parser.add_argument("--records", type=Path, default=ROOT / "outputs/session_cards/classification_records_all.json")
-    parser.add_argument("--stage-results", type=Path)
+    parser.add_argument("--stage-results", type=Path, help="Deprecated; ignored because stage is mapped from technique.")
     parser.add_argument("--technique-results", type=Path)
+    parser.add_argument("--task-mode", choices=["stage1", "stage2", "both"], default="both")
+    parser.add_argument("--output", type=Path, help="Single output path for stage1 or stage2 mode.")
     parser.add_argument("--stage-output", type=Path, default=ROOT / "outputs/submissions/stage1_submission.csv")
     parser.add_argument("--technique-output", type=Path, default=ROOT / "outputs/submissions/stage2_submission.csv")
     parser.add_argument("--report", type=Path, default=ROOT / "outputs/submissions/submission_export_report.md")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
+    if args.output and args.task_mode == "both":
+        parser.error("--output requires --task-mode stage1 or stage2")
     records = load_json(args.records) if args.records.exists() else []
     technique_results = result_map(load_results(args.technique_results)) if args.technique_results else {}
-    dry_run = args.dry_run
-
-    validation_errors: list[str] = []
-    if not dry_run:
+    errors: list[str] = []
+    if not args.dry_run:
         if not args.technique_results:
-            validation_errors.append("--technique-results is required unless --dry-run is used")
+            errors.append("--technique-results is required unless --dry-run is used")
         for record in records:
-            rid = str(record.get("record_id") or record.get("session_id"))
+            rid = str(first_present(record, "record_id", "session_id"))
             item = technique_results.get(rid)
+            code = (item or {}).get("predicted_code") or (item or {}).get("technique_code")
             if not item:
-                validation_errors.append(f"{rid}: missing technique result")
-                continue
-            technique_code = item.get("predicted_code") or item.get("technique_code")
-            if technique_code not in TECHNIQUE_CODES:
-                validation_errors.append(f"{rid}: invalid technique code `{technique_code}`")
-
-    if validation_errors:
-        lines = [
-            "# Submission export report",
-            "",
-            "- Status: failed",
-            "- Dry-run placeholder: false",
-            f"- Records input: `{display_path(args.records)}`",
-            f"- Technique results: `{args.technique_results}`",
-            f"- Legacy stage results ignored: {str(bool(args.stage_results)).lower()}",
-            "",
-            "## Validation errors",
-            "",
-            *[f"- {error}" for error in validation_errors],
-        ]
+                errors.append(f"{rid}: missing technique result")
+            elif code not in TECHNIQUE_CODES:
+                errors.append(f"{rid}: invalid technique code `{code}`")
+    if errors:
         args.report.parent.mkdir(parents=True, exist_ok=True)
-        args.report.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        print(f"submission export failed with {len(validation_errors)} validation errors")
+        args.report.write_text("# Submission export report\n\n- Status: failed\n\n" + "\n".join(f"- {error}" for error in errors) + "\n", encoding="utf-8")
+        print(f"submission export failed with {len(errors)} validation errors")
         return 2
 
     stage_rows: list[dict[str, Any]] = []
     technique_rows: list[dict[str, Any]] = []
     for record in records:
-        rid = str(record.get("record_id") or record.get("session_id"))
-        session_id = str(record.get("session_id") or rid)
-        pcap_id = record.get("pcap_id")
+        rid = str(first_present(record, "record_id", "session_id"))
+        result = {} if args.dry_run else technique_results[rid]
+        technique = "TN01_01" if args.dry_run else result.get("predicted_code") or result.get("technique_code")
+        stage_rows.append(official_row(record, result, TECHNIQUE_TO_STAGE[technique], STAGE_LABEL_FIELD))
+        technique_rows.append(official_row(record, result, technique, TECHNIQUE_LABEL_FIELD))
 
-        technique_code = "TN01_01" if dry_run else (
-            technique_results[rid].get("predicted_code") or technique_results[rid].get("technique_code")
-        )
-        stage_code = TECHNIQUE_TO_STAGE[technique_code]
-
-        stage_rows.append({"pcap_id": pcap_id, "session_id": session_id, "stage_code": stage_code})
-        technique_rows.append({"pcap_id": pcap_id, "session_id": session_id, "technique_code": technique_code})
-
-    write_csv(args.stage_output, ["pcap_id", "session_id", "stage_code"], stage_rows)
-    write_csv(args.technique_output, ["pcap_id", "session_id", "technique_code"], technique_rows)
+    written: list[Path] = []
+    if args.task_mode in {"stage1", "both"}:
+        stage_path = args.output if args.task_mode == "stage1" and args.output else args.stage_output
+        write_csv(stage_path, COMMON_FIELDS + [STAGE_LABEL_FIELD, REASON_FIELD], stage_rows)
+        written.append(stage_path)
+    if args.task_mode in {"stage2", "both"}:
+        technique_path = args.output if args.task_mode == "stage2" and args.output else args.technique_output
+        write_csv(technique_path, COMMON_FIELDS + [TECHNIQUE_LABEL_FIELD, REASON_FIELD], technique_rows)
+        written.append(technique_path)
 
     lines = [
-        "# Submission export report",
-        "",
-        f"- Records input: `{display_path(args.records)}`",
-        f"- Records exported: {len(records)}",
-        f"- Stage CSV: `{display_path(args.stage_output)}`",
-        f"- Technique CSV: `{display_path(args.technique_output)}`",
-        f"- Dry-run placeholder: {str(dry_run).lower()}",
-        f"- Legacy stage results supplied and ignored: {str(bool(args.stage_results)).lower()}",
-        "- Stage source: deterministic technique-to-stage mapping.",
-        "",
-        "## Schema",
-        "",
-        "- Stage 1 fields: `pcap_id`, `session_id`, `stage_code`.",
-        "- Stage 2 fields: `pcap_id`, `session_id`, `technique_code`.",
-        "- CSV encoding: `utf-8-sig`.",
-        "",
-        "If the organizer's final template requires start time, end time, source IP, source port, destination IP, destination port, or judgment reason, those fields can be exported from `classification_records_all.json` plus model result JSON.",
-        "",
-        "## Validation",
-        "",
+        "# Submission export report", "", "- Status: success", f"- Task mode: `{args.task_mode}`",
+        f"- Records exported: {len(records)}", f"- Dry-run placeholder: {str(args.dry_run).lower()}",
+        "- Internal prediction strategy: technique-first.", "- Stage source: deterministic technique-to-stage mapping.",
+        "- CSV encoding: `utf-8-sig`.", f"- Legacy stage results supplied and ignored: {str(bool(args.stage_results)).lower()}", "",
+        *[f"- Output: `{display_path(path)}`" for path in written], "",
+        "Stage1 uses the organizer field order and stage label column. Stage2 preserves the same evidence columns and switches only the closed-set label column.",
     ]
-    if dry_run:
-        lines.append("- CSV files are dry-run placeholders using `TN01` / `TN01_01`; they are not model results.")
-    else:
-        lines.append("- All records had a valid official technique code; no normal-class fallback was applied.")
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"exported {len(records)} rows per CSV")
+    print(f"exported {len(records)} rows for task_mode={args.task_mode}")
     return 0
 
 

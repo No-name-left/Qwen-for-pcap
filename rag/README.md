@@ -40,6 +40,7 @@ rag/
 │   ├── protocols/
 │   ├── signatures/
 │   ├── false_positive_rules/
+│   ├── competition_decision_boundaries/ # short feature-triggered closed-set cards
 │   └── aggregation_policy/    # legacy aggregation docs need session-level review
 ├── metadata/
 ├── chunks/
@@ -78,7 +79,8 @@ Current baseline:
 deterministic query from session card
 + keyword strong recall
 + metadata weighting
-+ top-k snippets
++ feature-triggered confusion-boundary cards
++ top-k ordinary snippets
 ```
 
 Exact protocol names, port numbers, Zeek fields, behavior indicators, and tshark fields should remain strong keyword signals. Vector or hybrid retrieval may be added later, but it is optional and not a current dependency.

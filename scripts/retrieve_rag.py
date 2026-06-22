@@ -67,7 +67,20 @@ def score_chunk(query: dict, chunk: dict) -> tuple[float, dict]:
     }
 
 
-def retrieve(queries: list[dict], chunks: list[dict], top_k: int) -> list[dict]:
+def snippet_from_chunk(score: float, breakdown: dict, chunk: dict, targeted: bool = False) -> dict:
+    return {
+        "chunk_id": chunk["chunk_id"],
+        "doc_id": chunk["doc_id"],
+        "title": chunk["title"],
+        "category": chunk["category"],
+        "score": round(score, 3),
+        "score_breakdown": breakdown,
+        "targeted_boundary": targeted,
+        "text": chunk["text"][:800],
+    }
+
+
+def retrieve(queries: list[dict], chunks: list[dict], top_k: int, max_boundary_chunks: int = 3) -> list[dict]:
     out = []
     for query in queries:
         scored = []
@@ -76,19 +89,22 @@ def retrieve(queries: list[dict], chunks: list[dict], top_k: int) -> list[dict]:
             if score > 0:
                 scored.append((score, breakdown, chunk))
         scored.sort(key=lambda item: (-item[0], item[2]["doc_id"], item[2]["chunk_id"]))
-        snippets = []
-        for score, breakdown, chunk in scored[:top_k]:
-            snippets.append(
-                {
-                    "chunk_id": chunk["chunk_id"],
-                    "doc_id": chunk["doc_id"],
-                    "title": chunk["title"],
-                    "category": chunk["category"],
-                    "score": round(score, 3),
-                    "score_breakdown": breakdown,
-                    "text": chunk["text"][:800],
-                }
-            )
+        targeted_ids = query.get("targeted_boundary_doc_ids", [])[:max_boundary_chunks]
+        targeted_chunks = []
+        for doc_id in targeted_ids:
+            targeted_chunks.extend(chunk for chunk in chunks if chunk.get("doc_id") == doc_id)
+        snippets = [
+            snippet_from_chunk(1000.0 - idx, {"targeted_boundary_bonus": 1000}, chunk, targeted=True)
+            for idx, chunk in enumerate(targeted_chunks[:max_boundary_chunks])
+        ]
+        seen = {item["chunk_id"] for item in snippets}
+        for score, breakdown, chunk in scored:
+            if chunk["chunk_id"] in seen:
+                continue
+            snippets.append(snippet_from_chunk(score, breakdown, chunk))
+            seen.add(chunk["chunk_id"])
+            if len(snippets) >= len(targeted_chunks[:max_boundary_chunks]) + top_k:
+                break
         item_id = query.get("record_id", query.get("event_id", query.get("query_id")))
         out.append(
             {
@@ -99,6 +115,8 @@ def retrieve(queries: list[dict], chunks: list[dict], top_k: int) -> list[dict]:
                 "query": query.get("query", ""),
                 "query_terms": query.get("query_terms", []),
                 "low_signal": query.get("low_signal", False),
+                "confusion_groups": query.get("confusion_groups", []),
+                "targeted_boundary_doc_ids": targeted_ids,
                 "snippets": snippets,
             }
         )
@@ -114,13 +132,14 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=ROOT / "outputs/rag_retrieval/qwen35_session_records_retrieved_knowledge_top5.json")
     parser.add_argument("--report", type=Path, default=ROOT / "outputs/rag_retrieval/qwen35_session_records_retrieval_report_top5.md")
     parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument("--max-boundary-chunks", type=int, default=3)
     parser.add_argument("--retriever-mode", default="keyword", choices=["keyword", "vector", "hybrid"])
     args = parser.parse_args()
     if args.retriever_mode != "keyword":
         raise ValueError("only keyword retriever mode is implemented in this baseline")
     queries = load_jsonl(args.queries)
     chunks = load_jsonl(args.chunks)
-    results = retrieve(queries, chunks, args.top_k)
+    results = retrieve(queries, chunks, args.top_k, args.max_boundary_chunks)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     lines = [
@@ -128,6 +147,7 @@ def main() -> int:
         "",
         f"- Retriever mode: {args.retriever_mode}",
         f"- Top K: {args.top_k}",
+        f"- Max targeted boundary chunks: {args.max_boundary_chunks}",
         f"- Records: {len(results)}",
         f"- Output: `{display_path(args.output)}`",
         "",
@@ -136,6 +156,7 @@ def main() -> int:
         lines.append(f"## {item['record_id']}")
         lines.append("")
         lines.append(f"- low_signal: {item.get('low_signal')}")
+        lines.append(f"- confusion_groups: {', '.join(item.get('confusion_groups', [])) or 'none'}")
         lines.append(f"- query_terms: {', '.join(map(str, item.get('query_terms', [])[:30]))}")
         for snip in item["snippets"]:
             lines.append(f"- {snip['doc_id']} / {snip['chunk_id']}: score={snip['score']}; breakdown={snip['score_breakdown']}")

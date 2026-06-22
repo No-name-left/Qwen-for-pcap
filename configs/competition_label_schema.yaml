@@ -61,28 +61,32 @@ csv_outputs:
   stage1_submission:
     path: outputs/submissions/stage1_submission.csv
     required_fields:
-      - pcap_id
-      - session_id
-      - stage_code
-    optional_audit_fields:
-      - reason
-      - confidence
-      - evidence_refs
-      - rag_doc_ids
+      - pcap
+      - 编号
+      - 开始时间
+      - 结束时间
+      - 源IP
+      - 源端口
+      - 目的IP
+      - 目的端口
+      - 攻击阶段编号或正常流量编号
+      - 研判理由（不计入评分）
   stage2_submission:
     path: outputs/submissions/stage2_submission.csv
     required_fields:
-      - pcap_id
-      - session_id
-      - technique_code
-    optional_audit_fields:
-      - reason
-      - confidence
-      - evidence_refs
-      - rag_doc_ids
+      - pcap
+      - 编号
+      - 开始时间
+      - 结束时间
+      - 源IP
+      - 源端口
+      - 目的IP
+      - 目的端口
+      - 攻击技术编号或正常流量编号
+      - 研判理由（不计入评分）
   report:
     path: outputs/submissions/submission_export_report.md
-    note: Reasons are for human inspection and should not be included in final CSV unless the official template allows them.
+    note: Reason is retained in the organizer layout but is not scored.
 
 legacy_semantic_label_mapping:
   normal:

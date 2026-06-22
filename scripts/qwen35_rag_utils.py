@@ -15,6 +15,7 @@ import yaml
 ROOT = Path(os.environ.get("PCAP_LLM_ROOT", Path(__file__).resolve().parents[1])).resolve()
 MICRO_DIR = ROOT / "微型testv2"
 REAL_MICRO_DIR = ROOT / "微型test_v2"
+DEFAULT_RUNTIME_PROFILES = ROOT / "configs/runtime_profiles.yaml"
 
 ATTACK_TYPES = {"normal", "port_scan", "exploit", "backdoor", "trojan_callback", "c2", "other_attack"}
 ATTACK_STAGES = {"none", "reconnaissance", "initial_access", "persistence", "command_and_control"}
@@ -46,6 +47,52 @@ def micro_path(*parts: str) -> Path:
 
 def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_env_file(path: Path) -> None:
+    """Load a simple KEY=VALUE file without overriding the process environment."""
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def load_runtime_profile(
+    profile_name: str,
+    path: Path = DEFAULT_RUNTIME_PROFILES,
+) -> dict[str, Any]:
+    """Load one runtime profile and resolve non-secret environment overrides."""
+    if not path.exists():
+        raise FileNotFoundError(f"missing runtime profiles: {path}")
+    document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    profiles = document.get("profiles", document)
+    if not isinstance(profiles, dict) or profile_name not in profiles:
+        available = ", ".join(sorted(profiles)) if isinstance(profiles, dict) else "none"
+        raise ValueError(f"unknown runtime profile `{profile_name}`; available: {available}")
+    profile = dict(profiles[profile_name] or {})
+    for field in ("base_url", "model", "max_model_len", "max_prompt_tokens", "max_prompt_chars", "max_rag_chunks", "max_rag_chars_per_chunk", "max_session_context_chars", "enable_thinking"):
+        env_name = profile.get(f"{field}_env")
+        if env_name and os.environ.get(str(env_name)) not in (None, ""):
+            value: Any = os.environ[str(env_name)]
+            if field in {"max_model_len", "max_prompt_tokens", "max_prompt_chars", "max_rag_chunks", "max_rag_chars_per_chunk", "max_session_context_chars"}:
+                value = int(value)
+            elif field == "enable_thinking":
+                value = str(value).strip().lower() in {"1", "true", "yes", "on"}
+            profile[field] = value
+    profile["name"] = profile_name
+    return profile
+
+
+def estimate_tokens(text: str) -> int:
+    """Conservative mixed Chinese/English estimate suitable for budget guards."""
+    return (len(text) + 2) // 3
 
 
 def write_json(path: Path, data: Any) -> None:

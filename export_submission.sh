@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
 DRY_RUN=false
+TASK_MODE=stage1
 ARGS=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -16,6 +17,14 @@ while [ "$#" -gt 0 ]; do
       ARGS+=("$1" "$2")
       shift 2
       ;;
+    --task-mode)
+      TASK_MODE="$2"
+      shift 2
+      ;;
+    --output|--report)
+      ARGS+=("$1" "$2")
+      shift 2
+      ;;
     *)
       echo "unknown argument: $1" >&2
       exit 2
@@ -24,7 +33,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ "$DRY_RUN" = true ]; then
-  python3 scripts/export_competition_csv.py --dry-run "${ARGS[@]}"
+  python3 scripts/export_competition_csv.py --task-mode "$TASK_MODE" --dry-run "${ARGS[@]}"
 else
-  python3 scripts/export_competition_csv.py "${ARGS[@]}"
+  python3 scripts/export_competition_csv.py --task-mode "$TASK_MODE" "${ARGS[@]}"
 fi

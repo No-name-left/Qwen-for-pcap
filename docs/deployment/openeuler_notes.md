@@ -34,3 +34,5 @@ http://127.0.0.1:8000/v1
 ```
 
 Store `BASE_URL`, `MODEL`, and `API_KEY` (or their `LLM_*` aliases) only in environment variables.
+
+Use `RUNTIME_PROFILE=ascend_openeuler_qwen35_27b`. The repository profile budgets prompts for a 4096-token Qwen3.5 service and disables thinking. vLLM-Ascend owns model/NPU loading; the PCAP/RAG/export scripts remain hardware-neutral.

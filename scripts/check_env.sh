@@ -12,6 +12,24 @@ if [ -f "$ROOT/.env" ]; then
   . "$ROOT/.env"
   set +a
 fi
+if [ -f "$ROOT/.env.local" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$ROOT/.env.local"
+  set +a
+fi
+
+runtime_profile="${RUNTIME_PROFILE:-ascend_openeuler_qwen35_27b}"
+profile_status="invalid"
+if python3 - "$ROOT/configs/runtime_profiles.yaml" "$runtime_profile" >/dev/null 2>&1 <<'PY'
+import sys, yaml
+path, name = sys.argv[1:]
+data = yaml.safe_load(open(path, encoding="utf-8")) or {}
+assert name in data.get("profiles", {})
+PY
+then
+  profile_status="readable"
+fi
 
 status_for_cmd() {
   local name="$1"
@@ -77,6 +95,7 @@ if [ -n "${HF_TOKEN:-}" ] || [ -n "${HUGGINGFACEHUB_API_TOKEN:-}" ]; then hf_tok
   echo "| tshark | $(status_for_cmd tshark) | $(version_for_cmd tshark --version) |"
   echo "| Zeek | $(status_for_cmd zeek) | $(version_for_cmd zeek --version) |"
   echo "| Docker | $(status_for_cmd docker) | optional; $(version_for_cmd docker --version) |"
+  echo "| Runtime profile | $profile_status | $runtime_profile |"
   echo
   echo "## LLM environment variables"
   echo

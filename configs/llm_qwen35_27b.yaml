@@ -9,7 +9,7 @@ provider:
 generation:
   temperature: 0.0
   top_p: 0.8
-  max_tokens: 8192
+  max_tokens: 384
   batch_size: 8
   request_timeout_seconds: 180
   enable_thinking: false

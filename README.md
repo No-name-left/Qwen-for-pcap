@@ -9,7 +9,7 @@ PCAP
 -> Zeek / tshark fallback
 -> session cards and scan_group records
 -> deterministic RAG query
--> keyword RAG retrieval
+-> keyword RAG retrieval plus feature-triggered confusion-boundary cards
 -> Qwen3.5 or another OpenAI-compatible endpoint predicts technique_code only
 -> official technique_code
 -> deterministic technique_code-to-stage_code mapping
@@ -88,6 +88,7 @@ Rebuild local RAG:
 ```bash
 python3 scripts/build_rag_chunks.py
 python3 scripts/build_keyword_index.py
+python3 scripts/test_rag_retrieval.py
 ```
 
 Offline parsing/session pipeline entry points:
@@ -97,6 +98,8 @@ bash run_stage1.sh
 bash run_stage2.sh
 ```
 
+`run_stage1.sh` exports the five-class stage label; `run_stage2.sh` exports the eight-class technique label. Both use the same technique-first model prompts, and stage1 maps technique to stage deterministically. Select deployment and prompt limits with `--runtime-profile`; see `configs/runtime_profiles.yaml` and `docs/runtime_profiles.md`.
+
 API configuration is environment-only:
 
 ```bash
@@ -105,7 +108,9 @@ export API_KEY="EMPTY"
 export MODEL="qwen3.5"
 ```
 
-The runner sends Qwen `chat_template_kwargs.enable_thinking=false` by default. Use `--disable-extra-body` for online providers that reject this extension. The offline stage scripts never call an API; invoke `scripts/run_qwen_openai_compatible.py` explicitly with a technique prompt directory.
+The runner sends Qwen `chat_template_kwargs.enable_thinking=false` by default. Use `--disable-extra-body` for online providers that reject this extension. The offline stage scripts never call an API; invoke `scripts/run_qwen_openai_compatible.py` explicitly with a technique prompt directory. `dry_run_mock` exercises result parsing and export without a network call.
+
+Targeted RAG is not unconditional prompt padding. Scan, authentication, Web/exploit, backdoor-direction, or outbound TLS/DNS/C2 features select only the relevant short boundary cards; ordinary top-ranked RAG follows within the runtime-profile budget.
 
 Do not run API batches blindly. Use the current small coverage set first, inspect the reports, then expand only if error analysis improves.
 

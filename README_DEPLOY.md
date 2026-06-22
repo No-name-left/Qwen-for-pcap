@@ -11,6 +11,13 @@ bash export_submission.sh --dry-run
 
 The default scripts do not call online APIs and do not consume model quota.
 
+Select one profile from `configs/runtime_profiles.yaml`:
+
+```bash
+export RUNTIME_PROFILE=ascend_openeuler_qwen35_27b
+# or: nvidia_ubuntu_online_api / dry_run_mock
+```
+
 ## Environment
 
 - Python 3 is required.
@@ -36,3 +43,7 @@ export API_KEY="EMPTY"
 `LLM_BASE_URL`, `LLM_MODEL_NAME`, and `LLM_API_KEY` remain supported aliases. The scripts only report whether an API key exists; they never print its value. The model predicts `technique_code` only; `stage_code` is mapped deterministically.
 
 Qwen/vLLM requests use `enable_thinking=false` by default. Add `--disable-extra-body` when an online provider does not accept Qwen chat-template parameters.
+
+The Ascend profile assumes a vLLM-Ascend service configured around `--max-model-len 4096 --max-num-seqs 1 --max-num-batched-tokens 2048 --gpu-memory-utilization 0.85`. Model service startup is deployment work; the classification scripts never import `torch_npu`, `transformers`, or load weights directly.
+
+Use GitHub as the code source on both Linux environments: clone once, then `git pull` reviewed commits. Do not maintain a divergent VM ZIP copy. Raw PCAPs, weights, secrets and large outputs stay outside Git; see `docs/vm_operation_notes.md`.
