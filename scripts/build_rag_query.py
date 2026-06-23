@@ -16,6 +16,18 @@ BOUNDARY_DOCS = {
     "ta01_02_vs_tn01_01": "boundary_ta01_02_vs_tn01_01",
     "ta11_01_vs_ta11_02": "boundary_ta11_01_vs_ta11_02",
     "ta11_02_vs_tn01_01": "boundary_ta11_02_vs_tn01_01",
+    "ta01_02_vs_ta11_01": "observable_exploit_indicator_mapping",
+    "ta03_01_vs_ta01_02": "observable_file_upload_and_implant_hints",
+    "ta03_01_vs_ta11_01": "observable_file_upload_and_implant_hints",
+}
+
+INDICATOR_DOCS = {
+    "vuln_scan_indicators": "observable_vulnerability_scan_indicators",
+    "exploit_indicators": "observable_exploit_indicator_mapping",
+    "auth_indicators": "observable_auth_bruteforce_indicators",
+    "implant_indicators": "observable_file_upload_and_implant_hints",
+    "backdoor_access_indicators": "observable_backdoor_access_vs_callback",
+    "c2_indicators": "observable_backdoor_access_vs_callback",
 }
 
 
@@ -57,6 +69,46 @@ def as_number(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def indicator_active(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, list):
+        return bool(value)
+    if isinstance(value, dict):
+        return any(indicator_active(item) for key, item in value.items() if key not in {"weak_evidence", "auth_protocol", "interval_summary", "beacon_score"})
+    return False
+
+
+def field_indicator_active(record: dict[str, Any], field: str) -> bool:
+    value = record.get(field) or {}
+    if field == "auth_indicators":
+        return any(bool(value.get(key)) for key in ("repeated_login_attempts", "failed_login_hint", "success_after_failures_hint", "username_field_seen", "password_field_seen"))
+    if field == "c2_indicators":
+        return as_number(value.get("beacon_score")) >= 0.5 or any(bool(value.get(key)) for key in ("periodic_connections", "dns_repeated_query", "tls_sni_repeated"))
+    return indicator_active(value)
+
+
+def indicator_fields_used(record: dict[str, Any]) -> list[str]:
+    fields = [field for field in INDICATOR_DOCS if field_indicator_active(record, field)]
+    if record.get("payload_visibility") == "encrypted_tls":
+        fields.append("payload_visibility")
+    return fields
+
+
+def targeted_rag_metadata(record: dict[str, Any], groups: list[str]) -> tuple[list[str], list[str], list[str]]:
+    used = indicator_fields_used(record)
+    triggers: list[str] = []
+    docs = [BOUNDARY_DOCS[group] for group in groups]
+    for field in used:
+        if field == "payload_visibility":
+            triggers.append("payload_visibility=encrypted_tls")
+            docs.append("observable_encrypted_visibility_limits")
+        else:
+            triggers.append(f"{field}=positive")
+            docs.append(INDICATOR_DOCS[field])
+    return dedupe(triggers), dedupe(docs), used
+
+
 def display_path(path: Path) -> str:
     resolved = path.resolve()
     try:
@@ -67,7 +119,10 @@ def display_path(path: Path) -> str:
 
 def detect_confusion_groups(record: dict[str, Any]) -> list[str]:
     """Select short decision cards from observable record features only."""
-    excluded = {"record_id", "session_id", "pcap_id", "pcap", "flow_source", "source_file", "parser_source"}
+    excluded = {
+        "record_id", "session_id", "pcap_id", "pcap", "flow_source", "source_file", "parser_source",
+        "pcap_summary", "evidence_limits", *INDICATOR_DOCS.keys(),
+    }
     signals = {key: value for key, value in record.items() if key not in excluded}
     blob = json.dumps(signals, ensure_ascii=False).lower()
     tokens = set(re.findall(r"[a-z0-9_+-]+", blob))
@@ -77,12 +132,18 @@ def detect_confusion_groups(record: dict[str, Any]) -> list[str]:
     except (TypeError, ValueError):
         dst_port = 0
     groups: list[str] = []
+    vuln_active = field_indicator_active(record, "vuln_scan_indicators")
+    exploit_active = field_indicator_active(record, "exploit_indicators")
+    auth_active = field_indicator_active(record, "auth_indicators")
+    implant_active = field_indicator_active(record, "implant_indicators")
+    backdoor_active = field_indicator_active(record, "backdoor_access_indicators")
+    c2_active = field_indicator_active(record, "c2_indicators")
     many_ports = max(
         as_number(record.get("same_src_unique_dst_ports")),
         as_number(record.get("unique_dst_ports")),
     ) >= 8
     scan_tokens = {"scan", "scanner", "nikto", "openvas", "nessus", "nmap"}
-    if record.get("record_type") == "scan_group" or many_ports or bool(tokens & scan_tokens) or any(word in blob for word in ("service enumeration", "version probe")):
+    if record.get("record_type") == "scan_group" or many_ports or vuln_active or bool(tokens & scan_tokens) or any(word in blob for word in ("service enumeration", "version probe")):
         groups.append("ta43_01_vs_ta43_02")
 
     auth_service = service in {"ssh", "ftp", "rdp", "smb", "smb2", "kerberos", "ldap"} or dst_port in {21, 22, 23, 445, 3389}
@@ -91,23 +152,27 @@ def detect_confusion_groups(record: dict[str, Any]) -> list[str]:
         as_number(record.get("same_src_conn_count")),
     ) >= 5
     auth_words = ("login", "authentication", "password", "bruteforce", "brute force", "patator")
-    if auth_service or repeated and any(proto in blob for proto in ("ssh", "ftp", "rdp", "login")) or any(word in blob for word in auth_words):
+    if auth_active or auth_service or repeated and any(proto in blob for proto in ("ssh", "ftp", "rdp", "login")) or any(word in blob for word in auth_words):
         groups.append("ta01_01_vs_tn01_01")
 
     web_context = service in {"http", "https", "ssl", "tls"} or dst_port in {80, 443, 8000, 8080, 8443} or bool(record.get("http_summary"))
     exploit_words = ("exploit", "cve-", "command injection", "sql injection", "xss", "../", "webshell", "payload")
-    if web_context or any(word in blob for word in exploit_words):
+    if exploit_active or web_context or any(word in blob for word in exploit_words):
         groups.append("ta01_02_vs_tn01_01")
+    if exploit_active and (backdoor_active or any(word in blob for word in ("cmd=", "exec=", "webshell", "shell.php", "cmd.jsp"))):
+        groups.append("ta01_02_vs_ta11_01")
+    if implant_active:
+        groups.extend(["ta03_01_vs_ta01_02", "ta03_01_vs_ta11_01"])
 
     access_words = ("backdoor access", "webshell", "reverse shell", "interactive shell", "operator", "shell command")
     callback_words = ("callback", "beacon", "checkin", "botnet")
     has_access = any(word in blob for word in access_words)
     has_callback = any(word in blob for word in callback_words) or bool(tokens & {"c2", "cnc", "rat"})
-    if has_access or has_callback:
+    if backdoor_active or c2_active or has_access or has_callback:
         groups.append("ta11_01_vs_ta11_02")
 
     outbound_context = service in {"dns", "http", "https", "ssl", "tls"} or bool(record.get("dns_summary")) or bool(record.get("tls_summary"))
-    if has_callback or outbound_context:
+    if c2_active or has_callback or outbound_context:
         groups.append("ta11_02_vs_tn01_01")
     return dedupe(groups)
 
@@ -128,6 +193,13 @@ def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
     add_term(terms, record.get("http_summary"))
     add_term(terms, record.get("dns_summary"))
     add_term(terms, record.get("tls_summary"))
+    for field in INDICATOR_DOCS:
+        if field_indicator_active(record, field):
+            terms.append(field)
+            add_term(terms, record.get(field))
+    add_term(terms, record.get("payload_visibility"))
+    add_term(terms, record.get("suspicious_payload_snippets"))
+    add_term(terms, record.get("suspicious_uri_patterns"))
 
     if record.get("record_type") == "scan_group":
         terms.extend(["scan_group", "many destination ports", "failed connections", "port scan", "TA43_01"])
@@ -139,24 +211,31 @@ def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
         terms.extend(["failed connection rate", "reconnaissance", "TA43_01"])
         rules.append("failed_rate")
 
-    blob = json.dumps(record, ensure_ascii=False).lower()
+    legacy_values = [
+        record.get(key) for key in (
+            "proto", "service", "http_summary", "dns_summary", "tls_summary",
+            "alert_summary", "notice_summary", "weird_summary", "candidate_hint",
+            "suspicious_payload_snippets", "suspicious_uri_patterns",
+        ) if record.get(key) not in (None, "", [], {})
+    ]
+    blob = json.dumps(legacy_values, ensure_ascii=False).lower()
     blob_tokens = set(re.findall(r"[a-z0-9_+-]+", blob))
-    if any(s in blob for s in ["vulnerability scan", "scanner", "nikto", "nessus", "openvas", "version probe"]):
+    if field_indicator_active(record, "vuln_scan_indicators") or any(s in blob for s in ["vulnerability scan", "scanner", "nikto", "nessus", "openvas", "version probe"]):
         terms.extend(["vulnerability scan signs", "TA43_02"])
         rules.append("vulnerability_scan:TA43_02")
-    if any(s in blob for s in ["login", "authentication", "bruteforce", "brute force", "ssh", "ftp", "rdp"]):
+    if field_indicator_active(record, "auth_indicators") or any(s in blob for s in ["login", "authentication", "bruteforce", "brute force", "ssh", "ftp", "rdp"]):
         terms.extend(["login failures", "password bruteforce", "TA01_01"])
         rules.append("login_failures:TA01_01")
-    if any(s in blob for s in ["exploit", "cve", "command injection", "sql injection", "xss", "ms17-010", "payload"]):
+    if field_indicator_active(record, "exploit_indicators") or any(s in blob for s in ["exploit", "cve", "command injection", "sql injection", "xss", "ms17-010"]):
         terms.extend(["exploit alert", "payload", "vulnerability exploitation", "TA01_02"])
         rules.append("exploit_payload:TA01_02")
-    if any(s in blob for s in ["implant", "persistence", "webshell", "backdoor placement"]):
+    if field_indicator_active(record, "implant_indicators") or any(s in blob for s in ["implant", "persistence", "webshell", "backdoor placement"]):
         terms.extend(["implant", "persistence", "TA03_01"])
         rules.append("implant:TA03_01")
-    if any(s in blob for s in ["backdoor access", "reverse shell", "webshell command", "shell"]):
+    if field_indicator_active(record, "backdoor_access_indicators") or any(s in blob for s in ["backdoor access", "reverse shell", "webshell command"]):
         terms.extend(["backdoor access", "TA11_01"])
         rules.append("backdoor_access:TA11_01")
-    if any(s in blob for s in ["callback", "c2", "cnc", "beacon", "checkin"]) or "rat" in blob_tokens:
+    if field_indicator_active(record, "c2_indicators") or any(s in blob for s in ["callback", "c2", "cnc", "beacon", "checkin"]) or "rat" in blob_tokens:
         terms.extend(["callback", "C2", "periodic beacon", "TA11_02"])
         rules.append("callback_c2:TA11_02")
 
@@ -193,6 +272,7 @@ def main() -> int:
             record_id = record.get("record_id") or record.get("event_id")
             terms, rules, low_signal = record_terms(record)
             confusion_groups = detect_confusion_groups(record)
+            triggers, targeted_docs, used_fields = targeted_rag_metadata(record, confusion_groups)
             row = {
                 "record_id": record_id,
                 "query_id": record_id,
@@ -202,7 +282,10 @@ def main() -> int:
                 "query_terms": terms,
                 "matched_rules": rules,
                 "confusion_groups": confusion_groups,
-                "targeted_boundary_doc_ids": [BOUNDARY_DOCS[group] for group in confusion_groups],
+                "targeted_boundary_doc_ids": targeted_docs,
+                "targeted_rag_triggers": triggers,
+                "targeted_boundary_cards": targeted_docs,
+                "indicator_fields_used": used_fields,
                 "low_signal": low_signal,
             }
             rows.append(row)

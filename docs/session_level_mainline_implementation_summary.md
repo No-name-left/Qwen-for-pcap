@@ -6,6 +6,8 @@
 
 The offline session-level mainline runs without API calls and now fails clearly instead of silently accepting zero session cards. It recursively discovers case directories below `outputs/parsed/`. The model prompt path is technique-only; stage codes are derived deterministically.
 
+Session cards now also carry bounded observable HTTP evidence, Zeek file/auth metadata, closed-set indicator structures, explicit encrypted/missing-payload visibility, and a compact same-PCAP summary. TShark body fields are streamed through a redacting reducer; complete bodies, secret header values, and extracted files are not persisted. Prompt version is `observable_boundary_rag_v3`.
+
 ## Added and modified files
 
 Added key scripts:
@@ -16,6 +18,8 @@ Added key scripts:
 - `scripts/build_qwen35_session_prompts.py`
 - `scripts/export_competition_csv.py`
 - `scripts/package_release.sh`
+- `scripts/session_card_indicators.py`
+- `scripts/test_observable_evidence.py`
 - `run_stage1.sh`
 - `run_stage2.sh`
 - `export_submission.sh`
@@ -24,6 +28,7 @@ Modified key scripts:
 
 - `scripts/build_rag_query.py`
 - `scripts/retrieve_rag.py`
+- `scripts/parse_public_pcaps.py`
 
 Added documentation:
 
@@ -57,7 +62,19 @@ Updated generated RAG artifacts:
 - `rag/index/keyword_index.json`
 - `rag/index/keyword_index_report.md`
 
-## Offline run results
+Added seven short `rag/knowledge/observable_evidence/` cards for HTTP payload visibility, exploit strings, vulnerability scans, auth brute force, uploads/implants, access versus callback, and encrypted visibility limits.
+
+## Observable-evidence regression
+
+- Safe controlled PCAPs parsed: 8/8.
+- Session cards: 60; final records: 41; scan groups: 1.
+- HTTP sessions: 40; sessions with suspicious snippets: 15.
+- Inert `xp_cmdshell` evidence: positive in 2 sessions and visible in cards, records, queries, and no-RAG/RAG prompts.
+- Maximum prompt size: 8,508 characters / 2,836 estimated tokens, below the 10,200 / 3,400 profile guard.
+- Prompt version: `observable_boundary_rag_v3`.
+- No extra dependency was installed.
+
+## Earlier offline run results
 
 - Session card count: 0.
 - Scan group count: 0.

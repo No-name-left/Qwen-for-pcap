@@ -98,8 +98,15 @@ def generate_traffic(code: str, port: int, variant: int) -> None:
         for attempt in range(10):
             request(port, "POST", f"/login?attempt={attempt}", body="username=fixture&password=incorrect", user_agent="Controlled-Login-Failure-Tester/1.0")
     elif code == "TA01_02":
-        for path in ["/download?file=..%2F..%2Ftraining-marker", "/search?q=%27+OR+%271%27%3D%271", "/run?cmd=echo+INERT_MARKER", "/view?template=%3Cscript%3EINERT%3C%2Fscript%3E"]:
+        for path in ["/download?file=..%2F..%2Ftraining-marker", "/search?q=%27+OR+%271%27%3D%271", "/run?cmd=%3Bexec+master..xp_cmdshell+%27whoami%27%3B", "/view?template=%3Cscript%3EINERT%3C%2Fscript%3E"]:
             request(port, "GET", path, user_agent="Controlled-Inert-Exploit-String/1.0")
+        request(
+            port,
+            "POST",
+            "/api/query",
+            body="statement=;exec master..xp_cmdshell 'whoami';&token=fixture-secret",
+            user_agent="Controlled-Inert-Exploit-String/1.0",
+        )
     elif code == "TA03_01":
         for index in range(3):
             request(port, "POST", f"/admin/plugin/upload?filename=harmless-marker-{variant}-{index}.txt", body="NON_EXECUTABLE_TRAINING_MARKER", user_agent="Controlled-Harmless-Deployment/1.0")
@@ -153,11 +160,15 @@ def capture_one(code: str, variant: int, output: Path, interface: str) -> dict[s
     if capture.returncode not in {0, 130} or not output.exists() or output.stat().st_size <= 24:
         raise RuntimeError(f"capture failed for {code} v{variant}: rc={capture.returncode}; {stderr.strip()}")
     digest = hashlib.sha256(output.read_bytes()).hexdigest()
+    try:
+        output_label = str(output.relative_to(ROOT))
+    except ValueError:
+        output_label = str(output)
     return {
         "scenario_id": f"synthetic_{code.lower()}_v{variant}",
         "intended_label": code,
         "variant": variant,
-        "pcap_path": str(output.relative_to(ROOT)),
+        "pcap_path": output_label,
         "bytes": output.stat().st_size,
         "sha256": digest,
         "generation_script": "scripts/generate_controlled_pcaps/generate_safe_http_scenarios.py",
@@ -185,7 +196,11 @@ def main() -> int:
             rows.append(capture_one(code, variant, output, args.interface))
     args.report_json.parent.mkdir(parents=True, exist_ok=True)
     args.report_json.write_text(json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"pcaps": len(rows), "bytes": sum(row["bytes"] for row in rows), "report": str(args.report_json.relative_to(ROOT))}))
+    try:
+        report_label = str(args.report_json.relative_to(ROOT))
+    except ValueError:
+        report_label = str(args.report_json)
+    print(json.dumps({"pcaps": len(rows), "bytes": sum(row["bytes"] for row in rows), "report": report_label}))
     return 0
 
 

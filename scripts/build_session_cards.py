@@ -3,13 +3,22 @@ from __future__ import annotations
 
 import argparse
 import csv
+import ipaddress
 import json
 import math
-from collections import defaultdict
+import statistics
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
 from qwen35_rag_utils import ROOT, sanitize_for_prompt, write_json
+from session_card_indicators import (
+    EVIDENCE_LIMITS,
+    build_file_summary,
+    build_http_fields,
+    build_indicators,
+    has_positive_indicator,
+)
 
 
 FAILED_STATES = {"S0", "REJ", "RSTOS0", "RSTRH", "SH", "SHR"}
@@ -150,6 +159,13 @@ def packets_path(case_dir: Path) -> Path | None:
     return None
 
 
+def observable_http_path(case_dir: Path) -> Path | None:
+    for path in [case_dir / "tshark" / "observable_http.jsonl", case_dir / "observable_http.jsonl"]:
+        if path.exists():
+            return path
+    return None
+
+
 def display_path(path: Path) -> str:
     resolved = path.resolve()
     try:
@@ -166,6 +182,12 @@ def key_for_conn(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
         str(row.get("id.resp_p") or row.get("dst_port") or row.get("dport") or ""),
         str(row.get("proto") or "").lower(),
     )
+
+
+def canonical_key(key: tuple[str, str, str, str, str]) -> tuple[tuple[str, str], tuple[str, str], str]:
+    left = (str(key[0]), str(key[1]))
+    right = (str(key[2]), str(key[3]))
+    return (*sorted((left, right)), str(key[4]).lower())
 
 
 def conn_time(row: dict[str, Any]) -> float | None:
@@ -200,6 +222,13 @@ def packet_len(row: dict[str, str]) -> int:
     return parse_int(row.get("frame.len") or row.get("length") or row.get("len")) or 0
 
 
+def observation_key(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    return (
+        str(row.get("src_ip") or ""), str(row.get("src_port") or ""),
+        str(row.get("dst_ip") or ""), str(row.get("dst_port") or ""), "tcp",
+    )
+
+
 def rows_by_uid(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     out: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -207,6 +236,19 @@ def rows_by_uid(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
         if uid:
             out[str(uid)].append(row)
     return out
+
+
+def files_by_conn_uid(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    out: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        raw = str(row.get("conn_uids") or row.get("uid") or "")
+        for uid in re_split_set(raw):
+            out[uid].append(row)
+    return out
+
+
+def re_split_set(value: str) -> list[str]:
+    return [item.strip() for item in value.strip("[]{}()").replace(";", ",").split(",") if item.strip() and item.strip() != "-"]
 
 
 def make_http_summary(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -219,6 +261,8 @@ def make_http_summary(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
         "methods": sample([r.get("method") for r in rows]),
         "status_codes": sample([r.get("status_code") for r in rows]),
         "user_agents": sample([r.get("user_agent") for r in rows], 5),
+        "referrers": sample([r.get("referrer") for r in rows], 5),
+        "content_types": sample([r.get("mime_type") or r.get("content_type") for r in rows], 5),
     }
 
 
@@ -244,24 +288,111 @@ def make_tls_summary(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     }
 
 
+def make_session_evidence(
+    service: str | None,
+    dst_port: Any,
+    http_rows: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+    tls_rows: list[dict[str, Any]],
+    file_rows: list[dict[str, Any]],
+    ssh_rows: list[dict[str, Any]],
+    ftp_rows: list[dict[str, Any]],
+    observation_source_available: bool,
+    mapping_method: str,
+) -> dict[str, Any]:
+    http = build_http_fields(http_rows, observations)
+    files = build_file_summary(file_rows)
+    indicators = build_indicators(http, files, ssh_rows, ftp_rows)
+    normalized_service = str(service or "").lower()
+    is_http = bool(http_rows or observations or normalized_service in {"http", "http-alt"})
+    is_tls = bool(tls_rows or normalized_service in {"ssl", "tls", "https"})
+    is_ssh = bool(ssh_rows or normalized_service == "ssh")
+    is_quic = normalized_service in {"quic", "quic-ietf"} or (str(dst_port) == "443" and normalized_service == "udp")
+    warnings: list[str] = []
+    if is_http and not observation_source_available:
+        warnings.append("tshark_observable_http_unavailable; HTTP body/header-presence evidence may be incomplete")
+    if is_http and observation_source_available and not observations:
+        warnings.append("no_mapped_tshark_http_observation; Zeek HTTP metadata retained")
+    if is_tls:
+        payload_visibility = "encrypted_tls"
+        encrypted_protocol = "tls"
+    elif is_ssh:
+        payload_visibility = "metadata_only"
+        encrypted_protocol = "ssh"
+    elif is_quic:
+        payload_visibility = "metadata_only"
+        encrypted_protocol = "quic"
+    elif is_http:
+        payload_visibility = "plaintext_http"
+        encrypted_protocol = "none"
+    elif service or dst_port:
+        payload_visibility = "metadata_only"
+        encrypted_protocol = "none"
+    else:
+        payload_visibility = "unknown"
+        encrypted_protocol = "unknown"
+    http_summary = None
+    if is_http:
+        http_summary = {
+            "count": max(len(http_rows), len(observations)),
+            "hosts": http["http_hosts"],
+            "uris": http["http_uris_sample"],
+            "methods": http["http_methods"],
+            "status_codes": http["http_status_codes"],
+            "user_agents": http["http_user_agents"],
+            "content_types": http["http_content_types"],
+        }
+    evidence: dict[str, Any] = {
+        "payload_visibility": payload_visibility,
+        "observable_payload_available": bool(is_http and (http["http_uris_sample"] or http["http_body_observed"])),
+        "encrypted_protocol": encrypted_protocol,
+        "extraction_warnings": warnings,
+        "evidence_limits": dict(EVIDENCE_LIMITS),
+        "evidence_mapping": {
+            "method": mapping_method,
+            "confidence": "high" if mapping_method in {"zeek_uid", "tcp_stream"} else "medium" if mapping_method == "bidirectional_five_tuple" else "not_applicable",
+        },
+        "http_summary": http_summary,
+        **http,
+        "transferred_files_summary": files,
+        **indicators,
+    }
+    return evidence
+
+
 def build_cards_from_packets(
     packet_rows: list[dict[str, str]],
     pcap_id: str,
+    observations: list[dict[str, Any]] | None = None,
+    observation_source_available: bool = False,
 ) -> list[dict[str, Any]]:
-    grouped: dict[tuple[str, str, str, str, str], list[dict[str, str]]] = defaultdict(list)
+    grouped: dict[Any, list[dict[str, str]]] = defaultdict(list)
     for row in packet_rows:
         key = packet_key(row)
         if not key[0] or not key[2] or not key[4]:
             continue
-        grouped[key].append(row)
+        stream = row.get("tcp.stream")
+        group_key: Any = ("stream", stream) if stream not in (None, "") else ("flow", canonical_key(key))
+        grouped[group_key].append(row)
+
+    observations = observations or []
+    obs_by_stream: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    obs_by_key: dict[Any, list[dict[str, Any]]] = defaultdict(list)
+    for row in observations:
+        if row.get("tcp_stream") not in (None, ""):
+            obs_by_stream[str(row["tcp_stream"])].append(row)
+        obs_by_key[canonical_key(observation_key(row))].append(row)
 
     cards: list[dict[str, Any]] = []
-    for idx, (key, rows) in enumerate(sorted(grouped.items(), key=lambda item: (packet_time(item[1][0]) or 0.0, item[0])), start=1):
-        src_ip, src_port, dst_ip, dst_port, proto = key
+    for idx, (_group_key, rows) in enumerate(sorted(grouped.items(), key=lambda item: (packet_time(item[1][0]) or 0.0, str(item[0]))), start=1):
+        first = rows[0]
+        src_ip, src_port, dst_ip, dst_port, proto = packet_key(first)
         times = [t for t in (packet_time(row) for row in rows) if t is not None]
         start = min(times) if times else None
         end = max(times) if times else None
         tcp_stream = sample([row.get("tcp.stream") for row in rows], 1)
+        mapped_observations = obs_by_stream.get(str(tcp_stream[0]), []) if tcp_stream else obs_by_key.get(canonical_key(packet_key(first)), [])
+        mapping_method = "tcp_stream" if tcp_stream and mapped_observations else "bidirectional_five_tuple" if mapped_observations else "none"
         syn_count = sum(1 for row in rows if str(row.get("tcp.flags.syn", "")).lower() in {"1", "true"})
         ack_count = sum(1 for row in rows if str(row.get("tcp.flags.ack", "")).lower() in {"1", "true"})
         orig_bytes = sum(packet_len(row) for row in rows if row.get("ip.src") == src_ip)
@@ -269,6 +400,8 @@ def build_cards_from_packets(
         conn_state = None
         if proto == "tcp" and syn_count > 0 and ack_count == 0:
             conn_state = "S0"
+        service = next((str(row.get("_ws.col.Protocol") or "").lower() for row in rows if row.get("_ws.col.Protocol") and str(row.get("_ws.col.Protocol")).lower() not in {"tcp", "udp"}), None)
+        evidence = make_session_evidence(service, dst_port, [], mapped_observations, [], [], [], [], observation_source_available, mapping_method)
         card = {
             "record_type": "session",
             "session_id": f"{pcap_id}::session::{idx:06d}",
@@ -281,7 +414,7 @@ def build_cards_from_packets(
             "dst_ip": dst_ip or None,
             "dst_port": parse_int(dst_port) if str(dst_port).isdigit() else (dst_port or None),
             "proto": proto or None,
-            "service": None,
+            "service": service,
             "duration": round(end - start, 6) if start is not None and end is not None else None,
             "orig_pkts": sum(1 for row in rows if row.get("ip.src") == src_ip),
             "resp_pkts": sum(1 for row in rows if row.get("ip.src") == dst_ip),
@@ -291,7 +424,7 @@ def build_cards_from_packets(
             "history": "tshark_fallback",
             "zeek_uid": None,
             "tcp_stream": tcp_stream[0] if tcp_stream else None,
-            "http_summary": make_http_summary(rows) if any(row.get("http.host") or row.get("http.request.uri") for row in rows) else None,
+            **evidence,
             "dns_summary": make_dns_summary([{"query": row.get("dns.qry.name")} for row in rows if row.get("dns.qry.name")]),
             "tls_summary": make_tls_summary([{"server_name": row.get("tls.handshake.extensions_server_name")} for row in rows if row.get("tls.handshake.extensions_server_name")]),
         }
@@ -304,10 +437,24 @@ def build_cards_for_pcap(case_dir: Path, pcap_id: str) -> list[dict[str, Any]]:
     http_by_uid = rows_by_uid(read_zeek_log(log_path(case_dir, "http.log")))
     dns_by_uid = rows_by_uid(read_zeek_log(log_path(case_dir, "dns.log")))
     tls_by_uid = rows_by_uid(read_zeek_log(log_path(case_dir, "ssl.log")))
+    files_by_uid = files_by_conn_uid(read_zeek_log(log_path(case_dir, "files.log")))
+    ssh_by_uid = rows_by_uid(read_zeek_log(log_path(case_dir, "ssh.log")))
+    ftp_by_uid = rows_by_uid(read_zeek_log(log_path(case_dir, "ftp.log")))
     packet_rows = read_csv_rows(packets_path(case_dir))
-    packet_index = build_side_indexes(packet_rows, packet_key)
+    obs_path = observable_http_path(case_dir)
+    observations = read_zeek_log(obs_path)
+    observation_source_available = obs_path is not None
+    packet_index: dict[Any, list[dict[str, str]]] = defaultdict(list)
+    for packet in packet_rows:
+        packet_index[canonical_key(packet_key(packet))].append(packet)
+    obs_by_stream: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    obs_by_key: dict[Any, list[dict[str, Any]]] = defaultdict(list)
+    for observation in observations:
+        if observation.get("tcp_stream") not in (None, ""):
+            obs_by_stream[str(observation["tcp_stream"])].append(observation)
+        obs_by_key[canonical_key(observation_key(observation))].append(observation)
     if not conn_rows and packet_rows:
-        return build_cards_from_packets(packet_rows, pcap_id)
+        return build_cards_from_packets(packet_rows, pcap_id, observations, observation_source_available)
 
     cards: list[dict[str, Any]] = []
     for idx, row in enumerate(conn_rows, start=1):
@@ -317,8 +464,28 @@ def build_cards_for_pcap(case_dir: Path, pcap_id: str) -> list[dict[str, Any]]:
         end_ts = ts + duration if ts is not None and duration is not None else None
         uid = row.get("uid")
         key = (src_ip, src_port, dst_ip, dst_port, proto)
-        packets = packet_index.get(key, [])
+        packets = packet_index.get(canonical_key(key), [])
         tcp_stream = sample([p.get("tcp.stream") for p in packets], 1)
+        mapped_observations = obs_by_stream.get(str(tcp_stream[0]), []) if tcp_stream else []
+        mapping_method = "tcp_stream" if mapped_observations else "none"
+        if not mapped_observations:
+            mapped_observations = obs_by_key.get(canonical_key(key), [])
+            if mapped_observations:
+                mapping_method = "bidirectional_five_tuple"
+        service = row.get("service") if row.get("service") != "-" else None
+        uid_text = str(uid) if uid else ""
+        evidence = make_session_evidence(
+            service,
+            dst_port,
+            http_by_uid.get(uid_text, []),
+            mapped_observations,
+            tls_by_uid.get(uid_text, []),
+            files_by_uid.get(uid_text, []),
+            ssh_by_uid.get(uid_text, []),
+            ftp_by_uid.get(uid_text, []),
+            observation_source_available,
+            "zeek_uid" if http_by_uid.get(uid_text) else mapping_method,
+        )
         card = {
             "record_type": "session",
             "session_id": f"{pcap_id}::session::{idx:06d}",
@@ -331,7 +498,7 @@ def build_cards_for_pcap(case_dir: Path, pcap_id: str) -> list[dict[str, Any]]:
             "dst_ip": dst_ip or None,
             "dst_port": parse_int(dst_port) if str(dst_port).isdigit() else (dst_port or None),
             "proto": proto or None,
-            "service": row.get("service") if row.get("service") != "-" else None,
+            "service": service,
             "duration": duration,
             "orig_pkts": parse_int(row.get("orig_pkts")),
             "resp_pkts": parse_int(row.get("resp_pkts")),
@@ -341,7 +508,7 @@ def build_cards_for_pcap(case_dir: Path, pcap_id: str) -> list[dict[str, Any]]:
             "history": row.get("history") if row.get("history") != "-" else None,
             "zeek_uid": uid,
             "tcp_stream": tcp_stream[0] if tcp_stream else None,
-            "http_summary": make_http_summary(http_by_uid.get(str(uid), [])) if uid else None,
+            **evidence,
             "dns_summary": make_dns_summary(dns_by_uid.get(str(uid), [])) if uid else None,
             "tls_summary": make_tls_summary(tls_by_uid.get(str(uid), [])) if uid else None,
         }
@@ -358,10 +525,14 @@ def add_context_features(cards: list[dict[str, Any]]) -> None:
         by_src: dict[str, list[dict[str, Any]]] = defaultdict(list)
         by_dst: dict[str, list[dict[str, Any]]] = defaultdict(list)
         by_src_dst_port: dict[tuple[str, str, Any], list[dict[str, Any]]] = defaultdict(list)
+        by_endpoint: dict[tuple[str, str, Any, str], list[dict[str, Any]]] = defaultdict(list)
+        by_src_dst: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         for card in pcap_cards:
             by_src[str(card.get("src_ip"))].append(card)
             by_dst[str(card.get("dst_ip"))].append(card)
             by_src_dst_port[(str(card.get("src_ip")), str(card.get("dst_ip")), card.get("dst_port"))].append(card)
+            by_endpoint[(str(card.get("src_ip")), str(card.get("dst_ip")), card.get("dst_port"), str(card.get("proto")))].append(card)
+            by_src_dst[(str(card.get("src_ip")), str(card.get("dst_ip")))].append(card)
 
         src_stats = {}
         for src, src_cards in by_src.items():
@@ -388,6 +559,111 @@ def add_context_features(cards: list[dict[str, Any]]) -> None:
             card["same_src_failed_conn_rate"] = stats.get("failed_rate", 0.0)
             card["same_dst_unique_src_count"] = dst_unique_src_count.get(dst, 0)
             card["same_src_same_dst_port_count"] = src_dst_port_count.get((src, dst, card.get("dst_port")), 0)
+
+        # Cross-session indicators are computed only inside the current PCAP.
+        for endpoint_cards in by_endpoint.values():
+            endpoint_cards.sort(key=lambda c: (c.get("start_time") is None, c.get("start_time") or 0.0))
+            times = [parse_float(c.get("start_time")) for c in endpoint_cards]
+            times = [value for value in times if value is not None]
+            intervals = [b - a for a, b in zip(times, times[1:]) if b >= a]
+            mean_interval = statistics.mean(intervals) if intervals else None
+            interval_cv = statistics.pstdev(intervals) / mean_interval if len(intervals) >= 2 and mean_interval and mean_interval > 0 else None
+            periodic = len(intervals) >= 3 and mean_interval is not None and mean_interval >= 0.02 and interval_cv is not None and interval_cv <= 0.35
+            byte_totals = [int(c.get("orig_bytes") or 0) + int(c.get("resp_bytes") or 0) for c in endpoint_cards]
+            small_repeated = len(byte_totals) >= 4 and max(byte_totals, default=0) <= 4096
+            dns_queries = [q for c in endpoint_cards for q in (c.get("dns_summary") or {}).get("queries", [])]
+            tls_sni = [q for c in endpoint_cards for q in (c.get("tls_summary") or {}).get("server_names", [])]
+            repeated_dns = len(dns_queries) >= 3 and len(set(dns_queries)) < len(dns_queries)
+            repeated_sni = len(tls_sni) >= 3 and len(set(tls_sni)) < len(tls_sni)
+            first = endpoint_cards[0]
+            try:
+                src_private = ipaddress.ip_address(str(first.get("src_ip"))).is_private
+                dst_private = ipaddress.ip_address(str(first.get("dst_ip"))).is_private
+                client_external = src_private and not dst_private
+            except ValueError:
+                client_external = False
+            unusual_port = bool(first.get("dst_port") and int(first.get("dst_port")) not in {21, 22, 23, 25, 53, 80, 110, 123, 143, 443, 445, 993, 995, 3389}) if str(first.get("dst_port") or "").isdigit() else False
+            long_lived = any((parse_float(c.get("duration")) or 0) >= 300 for c in endpoint_cards)
+            score = sum([
+                0.35 if periodic else 0.0,
+                0.15 if len(endpoint_cards) >= 4 else 0.0,
+                0.15 if small_repeated else 0.0,
+                0.1 if repeated_dns or repeated_sni else 0.0,
+                0.1 if unusual_port else 0.0,
+                0.1 if client_external else 0.0,
+                0.05 if long_lived else 0.0,
+            ])
+            interval_summary = {
+                "count": len(intervals),
+                "mean_seconds": round(mean_interval, 3) if mean_interval is not None else None,
+                "cv": round(interval_cv, 3) if interval_cv is not None else None,
+                "min_seconds": round(min(intervals), 3) if intervals else None,
+                "max_seconds": round(max(intervals), 3) if intervals else None,
+            }
+            for card in endpoint_cards:
+                card["c2_indicators"] = {
+                    "periodic_connections": periodic,
+                    "fixed_remote_endpoint": len(endpoint_cards) >= 4,
+                    "small_repeated_payload": small_repeated,
+                    "long_lived_connection": long_lived,
+                    "dns_repeated_query": repeated_dns,
+                    "tls_sni_repeated": repeated_sni,
+                    "unusual_port": unusual_port,
+                    "client_initiated_external": client_external,
+                    "beacon_score": round(min(score, 1.0), 3),
+                    "interval_summary": interval_summary,
+                    "matched_keywords": [name for name, hit in (("periodic", periodic), ("fixed endpoint", len(endpoint_cards) >= 4), ("repeated DNS", repeated_dns), ("repeated SNI", repeated_sni)) if hit],
+                }
+
+        for pair_cards in by_src_dst.values():
+            all_uris = [uri for c in pair_cards for uri in c.get("http_uris_sample", [])]
+            statuses = [code for c in pair_cards for code in c.get("http_status_codes", [])]
+            backdoor_uris = [uri for c in pair_cards for uri in c.get("http_uris_sample", []) if any(word in str(uri).lower() for word in ("webshell", "shell.php", "cmd.php", "cmd.jsp", "c99", "r57"))]
+            for card in pair_cards:
+                vuln = card.get("vuln_scan_indicators") or {}
+                vuln["high_uri_fanout"] = bool(vuln.get("high_uri_fanout") or len(set(all_uris)) >= 8)
+                vuln["high_404_rate"] = bool(vuln.get("high_404_rate") or (len(statuses) >= 5 and sum(str(code) == "404" for code in statuses) / len(statuses) >= 0.6))
+                card["vuln_scan_indicators"] = vuln
+                backdoor = card.get("backdoor_access_indicators") or {}
+                backdoor["repeated_backdoor_endpoint_access"] = bool(backdoor.get("repeated_backdoor_endpoint_access") or len(backdoor_uris) >= 2)
+                card["backdoor_access_indicators"] = backdoor
+                auth = card.get("auth_indicators") or {}
+                if auth.get("auth_protocol") != "unknown" and card.get("same_src_same_dst_port_count", 0) >= 5:
+                    auth["repeated_login_attempts"] = True
+                    auth["same_src_same_dst_auth_attempts"] = card.get("same_src_same_dst_port_count")
+                    if not auth.get("failed_login_hint"):
+                        auth["weak_evidence"] = True
+                card["auth_indicators"] = auth
+
+        starts = [parse_float(c.get("start_time")) for c in pcap_cards if parse_float(c.get("start_time")) is not None]
+        ends = [parse_float(c.get("end_time")) for c in pcap_cards if parse_float(c.get("end_time")) is not None]
+        top = lambda values, limit=5: [{"value": value, "count": count} for value, count in Counter(v for v in values if v not in (None, "")).most_common(limit)]
+        indicator_names = ("exploit_indicators", "vuln_scan_indicators", "auth_indicators", "implant_indicators", "backdoor_access_indicators", "c2_indicators")
+        suspicious_counts = {name: sum(has_positive_indicator(c.get(name, {})) for c in pcap_cards) for name in indicator_names}
+        scan_sources = {
+            c.get("src_ip") for c in pcap_cards
+            if c.get("same_src_unique_dst_ports", 0) >= 8 and c.get("same_src_failed_conn_rate", 0) >= 0.4
+        }
+        auth_cards = [c for c in pcap_cards if has_positive_indicator(c.get("auth_indicators", {}))]
+        beacon_cards = [c for c in pcap_cards if (c.get("c2_indicators") or {}).get("beacon_score", 0) >= 0.5]
+        summary = {
+            "pcap_id": pcap_cards[0].get("pcap_id"),
+            "time_range": {"start": min(starts) if starts else None, "end": max(ends) if ends else None},
+            "total_sessions": len(pcap_cards),
+            "protocols_seen": sample([c.get("service") or c.get("proto") for c in pcap_cards]),
+            "top_src_ips": top([c.get("src_ip") for c in pcap_cards]),
+            "top_dst_ips": top([c.get("dst_ip") for c in pcap_cards]),
+            "top_dst_ports": top([c.get("dst_port") for c in pcap_cards]),
+            "http_hosts_sample": sample([host for c in pcap_cards for host in c.get("http_hosts", [])], 5),
+            "dns_queries_sample": sample([query for c in pcap_cards for query in (c.get("dns_summary") or {}).get("queries", [])], 5),
+            "tls_sni_sample": sample([sni for c in pcap_cards for sni in (c.get("tls_summary") or {}).get("server_names", [])], 5),
+            "suspicious_indicator_counts": suspicious_counts,
+            "scan_group_count": len(scan_sources),
+            "auth_attempt_summary": {"sessions_with_auth_hints": len(auth_cards), "failed_login_hint_sessions": sum(bool((c.get("auth_indicators") or {}).get("failed_login_hint")) for c in auth_cards)},
+            "beacon_like_summary": {"sessions_with_score_ge_0_5": len(beacon_cards), "max_beacon_score": max(((c.get("c2_indicators") or {}).get("beacon_score", 0) for c in pcap_cards), default=0)},
+        }
+        for card in pcap_cards:
+            card["pcap_summary"] = summary
 
 
 def main() -> int:

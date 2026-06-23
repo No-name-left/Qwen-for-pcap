@@ -11,6 +11,21 @@ from qwen35_rag_utils import ROOT, load_json, write_json
 
 
 FAILED_STATES = {"S0", "REJ", "RSTOS0", "RSTRH", "SH", "SHR"}
+OBSERVABLE_FIELDS = [
+    "payload_visibility", "observable_payload_available", "encrypted_protocol",
+    "extraction_warnings", "evidence_limits", "evidence_mapping",
+    "http_summary", "dns_summary", "tls_summary",
+    "http_methods", "http_hosts", "http_uris_sample", "http_full_uri_sample",
+    "http_status_codes", "http_user_agents", "http_referrers", "http_content_types",
+    "http_request_body_len", "http_response_body_len", "http_cookie_present",
+    "http_auth_header_present", "http_multipart_present", "http_upload_hints",
+    "http_body_observed", "request_body_snippets_sanitized",
+    "response_body_snippets_sanitized", "suspicious_payload_snippets",
+    "suspicious_http_parameters", "suspicious_uri_patterns",
+    "exploit_indicators", "vuln_scan_indicators", "auth_indicators",
+    "implant_indicators", "backdoor_access_indicators", "c2_indicators",
+    "transferred_files_summary", "pcap_summary",
+]
 
 
 def as_float(value: Any) -> float | None:
@@ -76,7 +91,7 @@ def make_scan_group(group: list[dict[str, Any]], idx: int) -> dict[str, Any]:
     start_times = [as_float(c.get("start_time")) for c in group if as_float(c.get("start_time")) is not None]
     end_times = [as_float(c.get("end_time")) for c in group if as_float(c.get("end_time")) is not None]
     first = group[0]
-    return {
+    record = {
         "record_type": "scan_group",
         "record_id": f"{first['pcap_id']}::scan_group::{idx:06d}",
         "session_id": f"{first['pcap_id']}::scan_group::{idx:06d}",
@@ -96,6 +111,44 @@ def make_scan_group(group: list[dict[str, Any]], idx: int) -> dict[str, Any]:
         "member_session_ids": [c["session_id"] for c in group],
         "candidate_hint": "TA43_01",
     }
+    for field in OBSERVABLE_FIELDS:
+        values = [card.get(field) for card in group if card.get(field) not in (None, "", [], {})]
+        if values:
+            record[field] = merge_observable_values(values, field)
+    # A vulnerability-scanner probe must override the generic port-scan candidate hint.
+    vuln = record.get("vuln_scan_indicators") or {}
+    if any(value is True for value in vuln.values()) or vuln.get("matched_keywords"):
+        record["candidate_hint"] = "TA43_02"
+    return record
+
+
+def merge_observable_values(values: list[Any], field: str = "") -> Any:
+    if not values:
+        return None
+    if field == "pcap_summary":
+        return values[0]
+    if all(isinstance(value, bool) for value in values):
+        return any(values)
+    if all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in values):
+        return sum(values) if field.endswith("_body_len") or field == "total_files" else max(values)
+    if all(isinstance(value, list) for value in values):
+        merged: list[Any] = []
+        seen: set[str] = set()
+        for item in (item for value in values for item in value):
+            key = json.dumps(item, ensure_ascii=False, sort_keys=True) if isinstance(item, (dict, list)) else str(item)
+            if key not in seen:
+                seen.add(key)
+                merged.append(item)
+            if len(merged) >= 12:
+                break
+        return merged
+    if all(isinstance(value, dict) for value in values):
+        keys = {key for value in values for key in value}
+        return {key: merge_observable_values([value[key] for value in values if key in value], key) for key in sorted(keys)}
+    if field == "payload_visibility":
+        order = ["plaintext_http", "encrypted_tls", "metadata_only", "unknown"]
+        return next((item for item in order if item in values), values[0])
+    return values[0]
 
 
 def make_session_record(card: dict[str, Any]) -> dict[str, Any]:
@@ -128,6 +181,7 @@ def make_session_record(card: dict[str, Any]) -> dict[str, Any]:
         "same_src_failed_conn_rate",
         "same_dst_unique_src_count",
         "same_src_same_dst_port_count",
+        *OBSERVABLE_FIELDS,
     ]
     record = {"record_type": "session", "record_id": card["session_id"], "session_id": card["session_id"]}
     for key in keep:

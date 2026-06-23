@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from build_rag_query import indicator_fields_used as detect_indicator_fields
 from qwen35_rag_utils import (
     DEFAULT_RUNTIME_PROFILES,
     REAL_MICRO_DIR,
@@ -17,7 +18,7 @@ from qwen35_rag_utils import (
 )
 
 
-PROMPT_VERSION = "boundary_rag_v2"
+PROMPT_VERSION = "observable_boundary_rag_v3"
 TECHNIQUE_CODES = ["TA43_01", "TA43_02", "TA01_01", "TA01_02", "TA03_01", "TA11_01", "TA11_02", "TN01_01"]
 CORE_KEYS = [
     "record_id", "session_id", "pcap", "pcap_id", "record_type", "parser_source",
@@ -28,13 +29,26 @@ CORE_KEYS = [
     "same_src_same_dst_port_count", "session_count", "unique_dst_ports", "failed_conn_rate",
     "time_window_neighbor_alert_count", "src_role", "dst_role", "initiator_role", "direction",
 ]
+OBSERVABLE_KEYS = [
+    "payload_visibility", "observable_payload_available", "encrypted_protocol",
+    "extraction_warnings", "evidence_mapping",
+    "http_methods", "http_hosts", "http_uris_sample", "http_full_uri_sample",
+    "http_status_codes", "http_user_agents", "http_referrers", "http_content_types",
+    "http_request_body_len", "http_response_body_len", "http_cookie_present",
+    "http_auth_header_present", "http_multipart_present", "http_upload_hints",
+    "request_body_snippets_sanitized", "response_body_snippets_sanitized",
+    "suspicious_payload_snippets", "suspicious_http_parameters", "suspicious_uri_patterns",
+    "exploit_indicators", "vuln_scan_indicators", "auth_indicators",
+    "implant_indicators", "backdoor_access_indicators", "c2_indicators",
+    "transferred_files_summary", "dns_summary", "tls_summary", "pcap_summary", "evidence_limits",
+]
 
 
-def load_retrieval(path: Path) -> dict[str, list[dict[str, Any]]]:
+def load_retrieval(path: Path) -> dict[str, dict[str, Any]]:
     if not path.exists():
         return {}
     data = load_json(path)
-    return {item.get("record_id") or item.get("event_id"): item.get("snippets", []) for item in data}
+    return {item.get("record_id") or item.get("event_id"): item for item in data}
 
 
 def display_path(path: Path) -> str:
@@ -63,15 +77,50 @@ def trim_value(value: Any, char_limit: int, list_limit: int = 12) -> Any:
 def compact_record(record: dict[str, Any], max_chars: int = 4500) -> dict[str, Any]:
     compact = {key: record.get(key) for key in CORE_KEYS if key in record}
     remaining = max(240, max_chars - len(json.dumps(compact, ensure_ascii=False)))
-    for key in (
-        "http_summary", "dns_summary", "tls_summary", "file_summary", "notice_summary",
-        "weird_summary", "alert_summary", "pcap_summary", "same_pcap_summary", "related_context",
-    ):
+    for key in ("notice_summary", "weird_summary", "alert_summary", "same_pcap_summary", "related_context"):
         if key in record and record.get(key) not in (None, "", [], {}):
             compact[key] = trim_value(record[key], min(900, remaining))
             remaining = max(120, max_chars - len(json.dumps(compact, ensure_ascii=False)))
     if "dst_ports_sample" in record:
         compact["dst_ports_sample"] = trim_value(record["dst_ports_sample"], 400, list_limit=20)
+    return compact
+
+
+def sparse_value(value: Any) -> Any:
+    """Omit false/empty indicator members in prompts while keeping full JSON in outputs."""
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            sparse = sparse_value(item)
+            if sparse not in (None, "", [], {}, False):
+                out[key] = sparse
+        return out
+    if isinstance(value, list):
+        return [sparse_value(item) for item in value if sparse_value(item) not in (None, "", [], {}, False)]
+    return value
+
+
+def compact_observable(record: dict[str, Any], max_chars: int) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    active_indicators = set(detect_indicator_fields(record))
+    for key in OBSERVABLE_KEYS:
+        if key not in record or record.get(key) in (None, "", [], {}):
+            continue
+        if key.endswith("_indicators") and key not in active_indicators:
+            continue
+        value = sparse_value(record[key]) if key.endswith("_indicators") or key == "transferred_files_summary" else record[key]
+        if value in (None, "", [], {}):
+            continue
+        current = len(json.dumps(compact, ensure_ascii=False))
+        remaining = max(100, max_chars - current)
+        # PCAP aggregates and limits are deliberately lowest priority and smallest.
+        cap = 500 if key == "pcap_summary" else 260 if key == "evidence_limits" else min(850, remaining)
+        candidate = trim_value(value, cap, list_limit=5)
+        trial = {**compact, key: candidate}
+        if len(json.dumps(trial, ensure_ascii=False)) <= max_chars:
+            compact[key] = candidate
+        elif key in {"payload_visibility", "observable_payload_available", "encrypted_protocol", "extraction_warnings", "suspicious_payload_snippets", "exploit_indicators"}:
+            compact[key] = trim_value(value, max(80, remaining), list_limit=3)
     return compact
 
 
@@ -81,12 +130,14 @@ def instruction_block() -> str:
         "Classify exactly one PCAP session/scan_group into the official closed set. Predict technique_code only; stage_code is derived by the program.\n"
         "Return exactly one JSON object and no Markdown, Thinking Process, or text outside JSON.\n"
         "The record is primary evidence. RAG is boundary guidance only; when RAG conflicts with observed behavior, follow the record.\n"
+        "Observable indicators are network-side evidence: they may show an attempt, upload, or command text but do not prove host-side execution, persistence, or success.\n"
         "Use only this record and same-PCAP aggregates. Never use IP/domain reputation or context from another PCAP.\n"
         "Missing payload is not proof of normality. Encrypted traffic is not normal by default; judge direction, repetition, timing, fanout, failures, bytes, and endpoint role.\n"
         "If evidence remains insufficient after behavioral review, TN01_01 is allowed. Ordinary HTTP/TLS/DNS or a few normal logins are not attacks.\n"
         "TA43_01 needs port/target fanout or short failed discovery; do not upgrade ordinary port scans to TA43_02. TA43_02 needs service fingerprinting, scanner paths/plugins, CVE or vulnerability-specific probes.\n"
         "TA01_01 needs repeated authentication attempts with failure/credential evidence. TA01_02 needs exploit payload, abnormal URI, injection, traversal, webshell upload, or vulnerability-trigger evidence.\n"
         "TA03_01 is deployment/persistence. TA11_01 is attacker-initiated access to an existing backdoor or interactive control entry. TA11_02 is victim-initiated callback/beacon/C2 behavior.\n"
+        "When plaintext suspicious strings are visible, use their URI/body context. When payload_visibility is encrypted_tls or metadata_only, do not invent content and do not default to normal solely because payload is hidden.\n"
         f"Allowed technique_code values: {', '.join(TECHNIQUE_CODES)}. No legacy or invented labels.\n"
         "Required JSON fields: record_id, pcap_id, record_type, start_time, end_time, src_ip, src_port, dst_ip, dst_port, predicted_code, confidence, reason.\n"
         "confidence must be 0..1 and reason must be one short sentence.\n"
@@ -117,6 +168,7 @@ def build_prompt(
     task: str,
     snippets: list[dict[str, Any]] | None,
     profile: dict[str, Any],
+    retrieval_meta: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     if task != "technique":
         raise ValueError("only technique classification prompts are supported; stage_code is derived deterministically")
@@ -124,12 +176,15 @@ def build_prompt(
     token_chars = int(profile.get("max_prompt_tokens", 3500)) * 3
     max_chars = min(configured_chars, token_chars)
     session_limit = int(profile.get("max_session_context_chars", 4500))
-    record_json = json.dumps(compact_record(record, session_limit), ensure_ascii=False, separators=(",", ":"))
+    core = compact_record(record, min(1800, session_limit))
+    core_json = json.dumps(core, ensure_ascii=False, separators=(",", ":"))
+    observable = compact_observable(record, max(600, session_limit - len(core_json)))
+    observable_json = json.dumps(observable, ensure_ascii=False, separators=(",", ":"))
     prefix = instruction_block()
     rag_block, meta = rag_section(snippets or [], profile) if snippets is not None else ("", {"rag_chunks_included": 0, "targeted_boundary_doc_ids": []})
-    suffix = "CLASSIFICATION_RECORD:\n" + record_json + "\n"
+    suffix = "OBSERVABLE_EVIDENCE_FROM_PCAP:\n" + observable_json + "\nCLASSIFICATION_RECORD:\n" + core_json + "\n"
     prompt = prefix + rag_block + suffix
-    truncated = "[truncated]" in record_json or " more]" in record_json
+    truncated = "[truncated]" in observable_json or " more]" in observable_json or "[truncated]" in core_json
     if len(prompt) > max_chars and rag_block:
         # Drop lowest-ranked ordinary RAG before any decision-boundary card.
         working = list(snippets or [])
@@ -143,9 +198,11 @@ def build_prompt(
             truncated = True
     if len(prompt) > max_chars:
         # Preserve schema/instructions and core fields; shorten verbose application summaries.
-        available = max(800, max_chars - len(prefix) - len(rag_block) - len("CLASSIFICATION_RECORD:\n\n"))
-        record_json = json.dumps(compact_record(record, min(session_limit, available)), ensure_ascii=False, separators=(",", ":"))
-        suffix = "CLASSIFICATION_RECORD:\n" + record_json + "\n"
+        available = max(900, max_chars - len(prefix) - len(rag_block) - len("OBSERVABLE_EVIDENCE_FROM_PCAP:\n\nCLASSIFICATION_RECORD:\n\n"))
+        core_json = json.dumps(compact_record(record, min(1600, available // 2)), ensure_ascii=False, separators=(",", ":"))
+        observable = compact_observable(record, max(450, available - len(core_json)))
+        observable_json = json.dumps(observable, ensure_ascii=False, separators=(",", ":"))
+        suffix = "OBSERVABLE_EVIDENCE_FROM_PCAP:\n" + observable_json + "\nCLASSIFICATION_RECORD:\n" + core_json + "\n"
         prompt = prefix + rag_block + suffix
         truncated = True
     if len(prompt) > max_chars and rag_block:
@@ -156,6 +213,7 @@ def build_prompt(
         truncated = True
     if len(prompt) > max_chars:
         raise ValueError(f"core prompt exceeds profile budget: {len(prompt)} > {max_chars}")
+    retrieval_meta = retrieval_meta or {}
     meta.update({
         "prompt_version": PROMPT_VERSION,
         "runtime_profile": profile.get("name", "inline"),
@@ -163,7 +221,19 @@ def build_prompt(
         "estimated_prompt_tokens": estimate_tokens(prompt),
         "max_prompt_chars": max_chars,
         "budget_truncated": truncated,
+        "observable_fields_included": list(observable),
+        "indicator_fields_used": retrieval_meta.get("indicator_fields_used") or detect_indicator_fields(record),
+        "targeted_rag_triggers": retrieval_meta.get("targeted_rag_triggers", []),
+        "targeted_boundary_cards": retrieval_meta.get("targeted_boundary_cards", meta.get("targeted_boundary_doc_ids", [])),
     })
+    meta["prompt_budget_summary"] = {
+        "prompt_chars": meta["prompt_chars"],
+        "estimated_prompt_tokens": meta["estimated_prompt_tokens"],
+        "max_prompt_chars": meta["max_prompt_chars"],
+        "budget_truncated": meta["budget_truncated"],
+        "rag_chunks_included": meta["rag_chunks_included"],
+        "observable_chars": len(observable_json),
+    }
     return prompt, meta
 
 
@@ -182,7 +252,7 @@ def prompt_text(
 
 def write_prompt_set(
     records: list[dict[str, Any]], out_dir: Path, task: str,
-    retrieval: dict[str, list[dict[str, Any]]] | None, profile: dict[str, Any],
+    retrieval: dict[str, dict[str, Any]] | None, profile: dict[str, Any],
 ) -> tuple[int, list[dict[str, Any]]]:
     out_dir.mkdir(parents=True, exist_ok=True)
     for old_prompt in out_dir.glob("*.txt"):
@@ -190,8 +260,9 @@ def write_prompt_set(
     manifest = []
     for record in records:
         record_id = record["record_id"]
-        snippets = retrieval.get(record_id, []) if retrieval is not None else None
-        text, metadata = build_prompt(record, task, snippets, profile)
+        retrieval_item = retrieval.get(record_id, {}) if retrieval is not None else {}
+        snippets = retrieval_item.get("snippets", []) if retrieval is not None else None
+        text, metadata = build_prompt(record, task, snippets, profile, retrieval_item)
         path = out_dir / f"{record_id.replace('/', '_').replace(':', '_')}.txt"
         path.write_text(text, encoding="utf-8")
         manifest.append({"record_id": record_id, "prompt_file": display_path(path), **metadata})

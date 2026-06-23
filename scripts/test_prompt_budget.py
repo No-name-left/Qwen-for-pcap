@@ -28,6 +28,10 @@ def main() -> int:
         "http_summary": {"uris": [f"/very/long/scanner/path/{index}?q=" + "x" * 180 for index in range(100)], "note": "Nikto CVE probe command injection webshell"},
         "dns_summary": {"queries": [f"beacon-{index}.example.invalid" for index in range(100)]},
         "tls_summary": {"sni": [f"fixed-{index}.example.invalid" for index in range(100)]},
+        "payload_visibility": "plaintext_http",
+        "suspicious_payload_snippets": ["q=;exec master..xp_cmdshell 'whoami'"],
+        "exploit_indicators": {"command_injection": True, "xp_cmdshell": True, "matched_keywords": ["xp_cmdshell"]},
+        "vuln_scan_indicators": {"nikto_user_agent": True, "high_uri_fanout": True, "matched_keywords": ["Nikto"]},
     }
     terms, rules, low_signal = record_terms(record)
     groups = detect_confusion_groups(record)
@@ -46,7 +50,9 @@ def main() -> int:
     assert meta["estimated_prompt_tokens"] <= int(profile["max_prompt_tokens"])
     assert meta["prompt_version"] == PROMPT_VERSION
     assert meta["targeted_boundary_doc_ids"]
-    assert "PROMPT_VERSION: boundary_rag_v2" in prompt
+    assert "PROMPT_VERSION: observable_boundary_rag_v3" in prompt
+    assert "OBSERVABLE_EVIDENCE_FROM_PCAP:" in prompt
+    assert "xp_cmdshell" in prompt
     assert "CLASSIFICATION_RECORD:" in prompt
     print(json.dumps({"prompt_chars": len(prompt), "estimated_tokens": meta["estimated_prompt_tokens"], "boundaries": meta["targeted_boundary_doc_ids"], "truncated": meta["budget_truncated"]}, ensure_ascii=False))
     return 0

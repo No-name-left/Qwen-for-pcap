@@ -7,7 +7,7 @@
 - Ground truth and label confidence remain outside `CLASSIFICATION_RECORD` and outside retrieved snippets.
 - Default execution only creates prompts. API calls require the explicit `--run-api` switch.
 - Prompt/mock preparation may use up to 64 records. Real API execution is safety-gated to at most two paired records (four calls), `RUN_REAL_API_TEST=1`, and a passing readiness report.
-- Current prompt version is `boundary_rag_v2`; every prompt manifest and evaluation context records it.
+- Current prompt version is `observable_boundary_rag_v3`; every prompt manifest and evaluation context records it.
 - Targeted RAG cards are selected from record features for the five named confusion pairs. They are ordered before ordinary top-k snippets but remain subordinate to record evidence.
 - Runtime-profile budgets cap session context, snippet count/size and final prompt length.
 

@@ -117,6 +117,9 @@ def retrieve(queries: list[dict], chunks: list[dict], top_k: int, max_boundary_c
                 "low_signal": query.get("low_signal", False),
                 "confusion_groups": query.get("confusion_groups", []),
                 "targeted_boundary_doc_ids": targeted_ids,
+                "targeted_rag_triggers": query.get("targeted_rag_triggers", []),
+                "targeted_boundary_cards": query.get("targeted_boundary_cards", targeted_ids),
+                "indicator_fields_used": query.get("indicator_fields_used", []),
                 "snippets": snippets,
             }
         )
@@ -132,7 +135,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=ROOT / "outputs/rag_retrieval/qwen35_session_records_retrieved_knowledge_top5.json")
     parser.add_argument("--report", type=Path, default=ROOT / "outputs/rag_retrieval/qwen35_session_records_retrieval_report_top5.md")
     parser.add_argument("--top-k", type=int, default=5)
-    parser.add_argument("--max-boundary-chunks", type=int, default=3)
+    parser.add_argument("--max-boundary-chunks", type=int, default=7)
     parser.add_argument("--retriever-mode", default="keyword", choices=["keyword", "vector", "hybrid"])
     args = parser.parse_args()
     if args.retriever_mode != "keyword":

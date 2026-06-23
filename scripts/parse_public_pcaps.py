@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import shutil
 import subprocess
 from pathlib import Path
+
+from session_card_indicators import make_safe_http_observation, sanitize_uri
 
 
 ROOT = Path(os.environ.get("PCAP_LLM_ROOT", Path(__file__).resolve().parents[1])).resolve()
@@ -25,10 +28,39 @@ TSHARK_FIELDS = [
     "tcp.flags.ack",
     "_ws.col.Protocol",
     "frame.len",
+    "http.request.method",
     "http.host",
-    "http.request.uri",
+    "http.response.code",
+    "http.user_agent",
+    "http.content_type",
+    "http.content_length",
     "dns.qry.name",
     "tls.handshake.extensions_server_name",
+]
+
+TSHARK_HTTP_OBSERVABLE_FIELDS = [
+    "frame.time_epoch",
+    "ip.src",
+    "ip.dst",
+    "tcp.srcport",
+    "tcp.dstport",
+    "tcp.stream",
+    "http.request.method",
+    "http.host",
+    "http.request.uri",
+    "http.request.full_uri",
+    "http.response.code",
+    "http.user_agent",
+    "http.referer",
+    "http.content_type",
+    "http.content_length",
+    # Values from the next two headers are never persisted; only presence flags are kept.
+    "http.cookie",
+    "http.authorization",
+    # Body/form values are reduced in memory to redacted keyword contexts.
+    "http.file_data",
+    "urlencoded-form.key",
+    "urlencoded-form.value",
 ]
 
 
@@ -67,6 +99,78 @@ def concise_error(stderr: str) -> str:
     return " | ".join(lines[:6])
 
 
+def sanitize_zeek_application_logs(zeek_dir: Path) -> None:
+    """Redact secrets that default Zeek application logs may expose."""
+    for name in ("http.log", "ftp.log"):
+        path = zeek_dir / name
+        if not path.exists():
+            continue
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        fields: list[str] = []
+        out: list[str] = []
+        for line in lines:
+            if line.startswith("#fields"):
+                fields = line.split("\t")[1:]
+                out.append(line)
+                continue
+            if line.startswith("#") or not fields:
+                out.append(line)
+                continue
+            parts = line.split("\t")
+            if len(parts) < len(fields):
+                parts.extend([""] * (len(fields) - len(parts)))
+            row = dict(zip(fields, parts))
+            if name == "http.log":
+                for field in ("uri", "referrer"):
+                    if field in row and row[field] not in {"", "-"}:
+                        parts[fields.index(field)] = sanitize_uri(row[field])
+                for field in ("username", "password"):
+                    if field in row and row[field] not in {"", "-"}:
+                        parts[fields.index(field)] = "[REDACTED]"
+            elif str(row.get("command") or "").upper() == "PASS" and "arg" in fields:
+                parts[fields.index("arg")] = "[REDACTED]"
+            out.append("\t".join(parts))
+        path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+def extract_safe_http_observations(pcap: Path, output: Path) -> tuple[int | None, int, str]:
+    """Stream selected TShark fields and persist only bounded, redacted evidence."""
+    cmd = [
+        "tshark", "-r", str(pcap),
+        "-o", "tcp.desegment_tcp_streams:TRUE",
+        "-o", "http.desegment_body:TRUE",
+        # Skip large/unknown reassembled bodies; Zeek metadata remains available.
+        "-Y", "http && (!http.file_data || (http.content_length && http.content_length <= 32768))",
+        "-T", "fields",
+        "-E", "header=y",
+        "-E", "separator=/t",
+        "-E", "quote=d",
+        "-E", "occurrence=a",
+        "-E", "aggregator=|",
+    ]
+    for field in TSHARK_HTTP_OBSERVABLE_FIELDS:
+        cmd.extend(["-e", field])
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+    except FileNotFoundError as exc:
+        return None, 0, str(exc)
+    count = 0
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", encoding="utf-8") as handle:
+        assert proc.stdout is not None
+        reader = csv.DictReader(proc.stdout, delimiter="\t", quotechar='"')
+        for row in reader:
+            safe = make_safe_http_observation(row)
+            if safe is None:
+                continue
+            handle.write(json.dumps(safe, ensure_ascii=False, sort_keys=True) + "\n")
+            count += 1
+    assert proc.stderr is not None
+    stderr = proc.stderr.read()
+    rc = proc.wait()
+    return rc, count, stderr
+
+
 def display_path(path: Path) -> str:
     resolved = path.resolve()
     try:
@@ -96,6 +200,8 @@ def parse_case(case_id: str, pcap: Path, output_dir: Path) -> dict:
 
     warnings: list[str] = []
     packets_csv = tshark_dir / "packets.csv"
+    observable_http = tshark_dir / "observable_http.jsonl"
+    observable_http_count = 0
     tshark_rc = None
     if command_exists("tshark"):
         tshark_cmd = [
@@ -118,6 +224,10 @@ def parse_case(case_id: str, pcap: Path, output_dir: Path) -> dict:
         tshark_rc, _, tshark_err = run(tshark_cmd, stdout_path=packets_csv)
         if tshark_rc != 0:
             warnings.append(f"tshark failed rc={tshark_rc}: {concise_error(tshark_err)}")
+        else:
+            observable_rc, observable_http_count, observable_err = extract_safe_http_observations(pcap_abs, observable_http)
+            if observable_rc != 0:
+                warnings.append(f"tshark observable HTTP extraction failed rc={observable_rc}: {concise_error(observable_err)}")
     else:
         warnings.append("tshark missing; packet CSV not generated")
 
@@ -130,6 +240,8 @@ def parse_case(case_id: str, pcap: Path, output_dir: Path) -> dict:
         (zeek_dir / "zeek_run.stderr").write_text(zeek_err, encoding="utf-8")
         if zeek_rc != 0:
             warnings.append(f"zeek failed rc={zeek_rc}: {concise_error(zeek_err)}")
+        else:
+            sanitize_zeek_application_logs(zeek_dir)
     else:
         (zeek_dir / "zeek_run.stderr").write_text("zeek missing\n", encoding="utf-8")
         warnings.append("zeek missing; session card builder will use tshark packet aggregation fallback")
@@ -143,6 +255,8 @@ def parse_case(case_id: str, pcap: Path, output_dir: Path) -> dict:
         "tshark_success": tshark_rc == 0 and packets_csv.exists() and packets_csv.stat().st_size > 0,
         "zeek_success": zeek_rc == 0,
         "tshark_packets_csv": display_path(packets_csv),
+        "tshark_observable_http": display_path(observable_http),
+        "tshark_observable_http_rows": observable_http_count,
         "zeek_generated_logs": zeek_logs,
         "session_parser_preference": "zeek_conn_then_tshark_fallback",
         "warnings": warnings,
