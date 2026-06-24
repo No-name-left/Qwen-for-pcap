@@ -330,7 +330,16 @@ def build_indicators(http: dict[str, Any], files: dict[str, Any], ssh_rows: list
 
     login_paths = [uri for uri in http.get("http_uris_sample", []) if LOGIN_PATH_RE.search(uri)]
     ftp_commands = [str(row.get("command") or "").upper() for row in ftp_rows]
+    ftp_response_codes = _dedupe([
+        str(row.get("reply_code")) for row in ftp_rows
+        if row.get("reply_code") not in (None, "", "-")
+    ])
+    ftp_usernames = {
+        str(row.get("arg")) for row in ftp_rows
+        if str(row.get("command") or "").upper() == "USER" and row.get("arg") not in (None, "", "-", "[REDACTED]")
+    }
     ssh_attempts = [_integer(row.get("auth_attempts")) or 0 for row in ssh_rows]
+    ssh_auth_failure_hint = any(str(row.get("auth_success")).lower() in {"f", "false"} for row in ssh_rows)
     auth_context = bool(login_paths or http.get("http_auth_header_present") or ssh_rows or ftp_rows)
     auth_statuses = [code for code in status_codes if auth_context and str(code) in {"401", "403", "407", "200", "204", "302"}]
     auth = {
@@ -343,6 +352,10 @@ def build_indicators(http: dict[str, Any], files: dict[str, Any], ssh_rows: list
         "same_src_same_dst_auth_attempts": max(len(login_paths), max(ssh_attempts, default=0), ftp_commands.count("PASS")),
         "username_field_seen": any(re.search(r"(?i)^(?:user|username)=", p) for p in http.get("suspicious_http_parameters", [])) or "USER" in ftp_commands,
         "password_field_seen": any(re.search(r"(?i)^(?:password|passwd|pwd)=", p) for p in http.get("suspicious_http_parameters", [])) or "PASS" in ftp_commands,
+        "unique_usernames_seen": len(ftp_usernames) or (1 if any(re.search(r"(?i)^(?:user|username)=", p) for p in http.get("suspicious_http_parameters", [])) else 0),
+        "failed_login_count": sum(str(code) in {"401", "403", "407"} for code in auth_statuses) + sum(str(code) in {"430", "530"} for code in ftp_response_codes) + sum(str(row.get("auth_success")).lower() in {"f", "false"} for row in ssh_rows),
+        "ftp_response_codes": ftp_response_codes,
+        "ssh_auth_failure_hint": ssh_auth_failure_hint,
         "weak_evidence": False,
     }
 

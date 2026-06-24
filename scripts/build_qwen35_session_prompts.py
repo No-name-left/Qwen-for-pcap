@@ -28,6 +28,14 @@ CORE_KEYS = [
     "same_src_unique_dst_ips", "same_src_failed_conn_rate", "same_dst_unique_src_count",
     "same_src_same_dst_port_count", "session_count", "unique_dst_ports", "failed_conn_rate",
     "time_window_neighbor_alert_count", "src_role", "dst_role", "initiator_role", "direction",
+    "auth_group_id", "auth_protocol", "attempt_count", "unique_usernames_seen",
+    "username_field_seen", "password_field_seen", "failed_login_count",
+    "success_after_failures_hint", "repeated_login_attempts", "same_src_same_dst_auth_attempts",
+    "time_span", "attempt_rate", "status_code_summary", "ftp_response_codes",
+    "ssh_auth_failure_hint", "http_login_paths", "weak_evidence_reason", "evidence_tier",
+    "c2_group_id", "connection_count", "interval_summary", "periodicity_score",
+    "bytes_pattern", "duration_pattern", "dns_query_repetition", "tls_sni_repetition",
+    "beacon_score", "callback_direction_hint", "member_session_count",
 ]
 OBSERVABLE_KEYS = [
     "payload_visibility", "observable_payload_available", "encrypted_protocol",
@@ -127,7 +135,7 @@ def compact_observable(record: dict[str, Any], max_chars: int) -> dict[str, Any]
 def instruction_block() -> str:
     return (
         f"PROMPT_VERSION: {PROMPT_VERSION}\n"
-        "Classify exactly one PCAP session/scan_group into the official closed set. Predict technique_code only; stage_code is derived by the program.\n"
+        "Classify exactly one PCAP session or behavioral group into the official closed set. Predict technique_code only; stage_code is derived by the program.\n"
         "Return exactly one JSON object and no Markdown, Thinking Process, or text outside JSON.\n"
         "The record is primary evidence. RAG is boundary guidance only; when RAG conflicts with observed behavior, follow the record.\n"
         "Observable indicators are network-side evidence: they may show an attempt, upload, or command text but do not prove host-side execution, persistence, or success.\n"
@@ -136,7 +144,9 @@ def instruction_block() -> str:
         "If evidence remains insufficient after behavioral review, TN01_01 is allowed. Ordinary HTTP/TLS/DNS or a few normal logins are not attacks.\n"
         "TA43_01 needs port/target fanout or short failed discovery; do not upgrade ordinary port scans to TA43_02. TA43_02 needs service fingerprinting, scanner paths/plugins, CVE or vulnerability-specific probes.\n"
         "TA01_01 needs repeated authentication attempts with failure/credential evidence. TA01_02 needs exploit payload, abnormal URI, injection, traversal, webshell upload, or vulnerability-trigger evidence.\n"
+        "For auth_attempt_group, require repeated attempts plus explicit failure or credential-field evidence; weak_auth_evidence is not enough for TA01_01.\n"
         "TA03_01 is deployment/persistence. TA11_01 is attacker-initiated access to an existing backdoor or interactive control entry. TA11_02 is victim-initiated callback/beacon/C2 behavior.\n"
+        "For c2_callback_group, use fixed remote endpoint, repeated source-initiated connections, interval/byte patterns, unusual port, and DNS/TLS repetition together.\n"
         "When plaintext suspicious strings are visible, use their URI/body context. When payload_visibility is encrypted_tls or metadata_only, do not invent content and do not default to normal solely because payload is hidden.\n"
         f"Allowed technique_code values: {', '.join(TECHNIQUE_CODES)}. No legacy or invented labels.\n"
         "Required JSON fields: record_id, pcap_id, record_type, start_time, end_time, src_ip, src_port, dst_ip, dst_port, predicted_code, confidence, reason.\n"

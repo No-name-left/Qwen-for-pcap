@@ -3,7 +3,7 @@
 This is a readiness set, not proof of final model quality.
 
 - Coverage subset: 24 records, exactly 3 per technique.
-- Strict subset: 12 external-high records only.
+- Strict subset: 6 external-high records only.
 - Medium and synthetic rows are coverage-only and must never enter strict metrics.
 
 | Technique | Tier | Count |

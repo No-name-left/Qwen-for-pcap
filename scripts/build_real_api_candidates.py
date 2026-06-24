@@ -178,6 +178,20 @@ def candidate_row(row: dict[str, Any], subsets: list[str]) -> dict[str, Any]:
     }
 
 
+def strict_evidence_supported(row: dict[str, Any]) -> bool:
+    if row.get("confidence_level") not in {"external_high_pcap", "external_high_flow"} or row.get("is_synthetic"):
+        return False
+    record = row.get("classification_record") or {}
+    code = row.get("technique_code")
+    if code == "TA01_01":
+        auth = record.get("auth_indicators") or {}
+        return bool(auth.get("repeated_login_attempts") and auth.get("failed_login_hint"))
+    if code == "TA11_02":
+        c2 = record.get("c2_indicators") or {}
+        return record.get("record_type") == "c2_callback_group" and float(c2.get("beacon_score") or 0) >= 0.65
+    return True
+
+
 def anonymize_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     pcap_aliases: dict[str, str] = {}
     output = []
@@ -268,7 +282,7 @@ def main() -> int:
         if len(chosen) != 3:
             raise ValueError(f"could not select 3 records for {code}")
         for row in chosen:
-            strict = row["confidence_level"] in {"external_high_pcap", "external_high_flow"} and not row["is_synthetic"]
+            strict = strict_evidence_supported(row)
             candidates.append(candidate_row(row, ["coverage_subset", "strict_subset"] if strict else ["coverage_subset"]))
 
     candidates = anonymize_candidates(candidates)

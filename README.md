@@ -50,21 +50,19 @@ Technique-to-stage fallback is deterministic: `TA43_* -> TA43`, `TA01_* -> TA01`
 - External-high PCAP coverage: `TA43_01=3`, `TA11_02=3` evaluation records.
 - External-high flow-only coverage: `TA01_01=5`, `TN01_01=4`; external-medium: `TA01_02=5`, `TA11_02=2`.
 - External gaps: `TA43_02`, `TA03_01`, `TA11_01`; each has three localhost `synthetic_controlled` coverage fixtures, never strict evidence.
-- Real-API readiness candidates: 24 records (three per technique), with a 12-record external-high strict subset.
+- Real-API readiness candidates: 24 records (three per technique); 6 legacy rows still meet the stricter observable-evidence filter.
+- Corrected observable-v3 strict gate: 9 records (`TA43_01=3`, behavior-group `TA11_02=3`, `TN01_01=3`); current flow data cannot support a strict `TA01_01` record.
 
 See `docs/official_code_data_rag_sft_small_test_summary.md` and `datasets/metadata/official_code_data_coverage_audit.md` for details.
 The current tiered review is `docs/reports/data_completion_round_report.md`.
 
 ## Current Evaluation Status
 
-The latest small coverage API test used 20 records across 5 available official codes. It completed without timeout, JSON parse failure, or illegal code, but accuracy was low:
+The latest guarded real-API gate used 9 corrected strict records in paired no-RAG/RAG mode. Both modes reached `9/9` technique and stage accuracy, with 100% API success, JSON parsing, and legal-label output. RAG produced 9 correct ties, no helpful changes, and no harmful changes.
 
-- technique accuracy: `5/20 = 0.25`
-- stage fallback accuracy: `5/20 = 0.25`
-- main confusion: `TA01_01/TA01_02 -> TN01_01`, and `TA11_02 -> TA43_01/TN01_01`
-- portscan `scan_group` was correctly predicted as `TA43_01`
+The earlier 12-record 50% result mixed isolated weak-auth flows and normal-looking sessions carrying broad infected-host labels. Those six rows were removed after a granularity audit; callback cases are now endpoint-aligned behavior groups, while `TA01_01` remains absent until strong authentication evidence is acquired. The corrected result passes the small VM-readiness gate but covers only three classes and is not a final model-quality claim.
 
-This is a smoke test, not a final model quality claim. Before expanding to 50-100 records, audit the 20 errors and improve prompt/RAG/evidence summaries.
+See `docs/reports/small_online_api_eval_observable_v3_strict_fixed.md` and `docs/reports/small_api_eval_error_audit.md`.
 
 ## Current SFT Status
 

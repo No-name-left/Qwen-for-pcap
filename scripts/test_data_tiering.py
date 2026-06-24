@@ -20,8 +20,9 @@ def main() -> int:
     assert Counter(row["intended_technique_code"] for row in candidates) == Counter({code: 3 for code in CODES})
     assert len({row["record_id"] for row in candidates}) == len(candidates)
     strict = [row for row in candidates if "strict_subset" in row["subset_membership"]]
-    assert len(strict) == 12
+    assert len(strict) == 6
     assert all(row["confidence_level"] in STRICT and not row["is_synthetic"] for row in strict)
+    assert not any(row["technique_code"] in {"TA01_01", "TA11_02"} for row in strict)
     assert all("strict_subset" not in row["subset_membership"] for row in candidates if row["confidence_level"] in {"external_medium", "external_low", "synthetic_controlled"})
     for row in candidates:
         assert row["technique_code"] == row["intended_technique_code"]

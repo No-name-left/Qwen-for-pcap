@@ -150,6 +150,7 @@ def phase_rows(phase_dir: Path, records: list[dict[str, Any]], modes: list[str])
                 "prompt_version": status.get("prompt_version", PROMPT_VERSION),
                 "prompt_path": manifests[mode].get(record_id, {}).get("prompt_file"),
                 "confidence_level": record.get("confidence_level"),
+                "evidence_tier": record.get("evidence_tier"),
                 "record_type": record.get("record_type"),
                 "ground_truth_technique_code": truth,
                 "ground_truth_stage_code": TECHNIQUE_TO_STAGE[truth],
@@ -229,6 +230,7 @@ def summarize_phase(
             disagreements += no_rag["predicted_technique_code"] != rag["predicted_technique_code"]
         paired.append({
             "record_id": record["record_id"], "confidence_level": record.get("confidence_level"),
+            "evidence_tier": record.get("evidence_tier"),
             "record_type": record.get("record_type"), "ground_truth": record["technique_code"],
             "no_rag_prediction": no_rag and no_rag["predicted_technique_code"],
             "rag_prediction": rag and rag["predicted_technique_code"],
@@ -250,6 +252,11 @@ def summarize_phase(
     tier_metrics = {
         tier: {mode: metric([row for row in rows if row["mode"] == mode and row["confidence_level"] == tier]) for mode in modes}
         for tier in tiers
+    }
+    evidence_tiers = sorted({str(record.get("evidence_tier")) for record in records})
+    evidence_tier_metrics = {
+        tier: {mode: metric([row for row in rows if row["mode"] == mode and str(row.get("evidence_tier")) == tier]) for mode in modes}
+        for tier in evidence_tiers
     }
     per_class = {
         code: {mode: metric([row for row in rows if row["mode"] == mode and row["ground_truth_technique_code"] == code]) for mode in modes}
@@ -275,7 +282,8 @@ def summarize_phase(
     )
     summary = {
         "phase": phase, "records": len(records), "calls": len(rows), "metrics": metrics,
-        "tier_metrics": tier_metrics, "per_class": per_class, "rag_helpful": helpful,
+        "tier_metrics": tier_metrics, "evidence_tier_metrics": evidence_tier_metrics,
+        "per_class": per_class, "rag_helpful": helpful,
         "rag_harmful": harmful, "rag_ties": len(paired) - helpful - harmful,
         "rag_disagreements": disagreements, "engineering_gate": engineering_gate,
         "prompt_budget_ok": prompt_budget_ok, "cost": cost,

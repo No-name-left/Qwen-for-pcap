@@ -65,7 +65,7 @@ def main() -> int:
             continue
         is_flow = bool(label.get("flow_only")) or source.get("parser_source") == "flow_csv"
         record_type = "flow_only" if is_flow else str(source.get("record_type") or label.get("record_type") or "session")
-        if record_type not in {"session", "scan_group", "flow_only"}:
+        if record_type not in {"session", "scan_group", "flow_only", "auth_attempt_group", "c2_callback_group"}:
             raise ValueError(f"unsupported record_type for {record_id}: {record_type}")
         confidence = normalize_confidence(str(label.get("mapping_confidence") or label.get("label_quality") or "low"))
         output.append({

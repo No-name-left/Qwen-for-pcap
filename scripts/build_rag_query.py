@@ -98,7 +98,7 @@ def indicator_fields_used(record: dict[str, Any]) -> list[str]:
 def targeted_rag_metadata(record: dict[str, Any], groups: list[str]) -> tuple[list[str], list[str], list[str]]:
     used = indicator_fields_used(record)
     triggers: list[str] = []
-    docs = [BOUNDARY_DOCS[group] for group in groups]
+    docs: list[str] = []
     for field in used:
         if field == "payload_visibility":
             triggers.append("payload_visibility=encrypted_tls")
@@ -106,6 +106,7 @@ def targeted_rag_metadata(record: dict[str, Any], groups: list[str]) -> tuple[li
         else:
             triggers.append(f"{field}=positive")
             docs.append(INDICATOR_DOCS[field])
+    docs.extend(BOUNDARY_DOCS[group] for group in groups)
     return dedupe(triggers), dedupe(docs), used
 
 
@@ -200,6 +201,19 @@ def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
     add_term(terms, record.get("payload_visibility"))
     add_term(terms, record.get("suspicious_payload_snippets"))
     add_term(terms, record.get("suspicious_uri_patterns"))
+
+    if record.get("record_type") == "auth_attempt_group":
+        terms.extend(["authentication attempt group", "repeated login attempts", "authentication failures", "TA01_01"])
+        add_term(terms, record.get("auth_protocol"))
+        add_term(terms, record.get("failed_login_count"))
+        add_term(terms, record.get("status_code_summary"))
+        rules.append("auth_attempt_group:TA01_01_boundary")
+    if record.get("record_type") == "c2_callback_group":
+        terms.extend(["callback group", "fixed remote endpoint", "periodic connection pattern", "C2", "TA11_02"])
+        add_term(terms, record.get("interval_summary"))
+        add_term(terms, record.get("bytes_pattern"))
+        add_term(terms, record.get("callback_direction_hint"))
+        rules.append("c2_callback_group:TA11_02_boundary")
 
     if record.get("record_type") == "scan_group":
         terms.extend(["scan_group", "many destination ports", "failed connections", "port scan", "TA43_01"])

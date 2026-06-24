@@ -14,17 +14,20 @@ from run_small_api_eval import select_records
 
 
 def main() -> int:
-    source = ROOT / "datasets/public_eval/real_api_candidate_records.jsonl"
+    source = ROOT / "datasets/public_eval/strict_observable_v3_records.jsonl"
     records = [json.loads(line) for line in source.read_text(encoding="utf-8").splitlines() if line.strip()]
-    strict = select_records(records, "strict", 12, 3)
-    assert len(strict) == 12
+    strict = select_records(records, "strict", 9, 3)
+    assert len(strict) == 9
     assert Counter(row["technique_code"] for row in strict) == Counter({
-        "TA43_01": 3, "TA01_01": 3, "TA11_02": 3, "TN01_01": 3,
+        "TA43_01": 3, "TA11_02": 3, "TN01_01": 3,
     })
     pcap = [row for row in strict if row["confidence_level"] == "external_high_pcap"]
     flow = [row for row in strict if row["confidence_level"] == "external_high_flow"]
-    assert len(pcap) == len(flow) == 6
-    assert all(row["classification_record"].get("pcap_summary") for row in pcap)
+    assert len(pcap) == 6 and len(flow) == 3
+    assert all(
+        row["classification_record"].get("pcap_summary") or row["classification_record"].get("c2_group_id")
+        for row in pcap
+    )
     assert all(not row["classification_record"].get("pcap_summary") for row in flow)
 
     profile = load_runtime_profile("nvidia_ubuntu_online_api", DEFAULT_RUNTIME_PROFILES)
@@ -38,8 +41,8 @@ def main() -> int:
         assert sum(bool(row["targeted_boundary_cards"]) for row in rag) >= 6
         assert any(row["targeted_rag_triggers"] for row in rag)
         prompt_blob = "\n".join(path.read_text(encoding="utf-8") for path in (out / "prompts").rglob("*.txt")).lower()
-        assert prompt_blob.count("prompt_version: observable_boundary_rag_v3") == 24
-        assert prompt_blob.count("observable_evidence_from_pcap:") == 24
+        assert prompt_blob.count("prompt_version: observable_boundary_rag_v3") == 18
+        assert prompt_blob.count("observable_evidence_from_pcap:") == 18
         assert not any(token in prompt_blob for token in ("xp_cmdshell", "powershell", "/bin/sh", "union select"))
     print("small API eval selection, observable evidence, targeted RAG, and prompt safety passed")
     return 0

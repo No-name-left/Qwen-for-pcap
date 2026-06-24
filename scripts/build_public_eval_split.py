@@ -38,7 +38,7 @@ def main() -> int:
             raise ValueError(f"illegal technique_code: {item['technique_code']}")
         if item["label_confidence"] not in {"high", "medium", "low"}:
             raise ValueError(f"illegal label_confidence: {item['label_confidence']}")
-        if item["record_type"] not in {"session", "scan_group", "flow_only"}:
+        if item["record_type"] not in {"session", "scan_group", "flow_only", "auth_attempt_group", "c2_callback_group"}:
             raise ValueError(f"illegal record_type: {item['record_type']}")
         if item["record_id"] in seen:
             raise ValueError(f"duplicate record_id: {item['record_id']}")
