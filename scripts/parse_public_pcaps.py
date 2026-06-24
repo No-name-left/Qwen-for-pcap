@@ -182,12 +182,14 @@ def display_path(path: Path) -> str:
         return str(path)
 
 
-def discover_pcaps(input_dir: Path, dataset_id: str | None) -> list[tuple[str, Path]]:
+def discover_pcaps(input_dir: Path, dataset_id: str | None, neutral_case_ids: bool = False) -> list[tuple[str, Path]]:
     pcaps = sorted([*input_dir.glob("*.pcap"), *input_dir.glob("*.pcapng"), *input_dir.glob("*.cap")])
     out = []
     for idx, pcap in enumerate(pcaps, start=1):
         case_id = dataset_id or pcap.stem
-        if len(pcaps) > 1 and dataset_id:
+        if dataset_id and neutral_case_ids:
+            case_id = f"{dataset_id}_{idx:03d}"
+        elif len(pcaps) > 1 and dataset_id:
             case_id = f"{dataset_id}_{idx:03d}_{pcap.stem}"
         out.append((case_id, pcap))
     return out
@@ -271,9 +273,10 @@ def main() -> int:
     parser.add_argument("--input-dir", type=Path, default=ROOT / "datasets/public/feasibility/raw")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "outputs/parsed/feasibility")
     parser.add_argument("--dataset-id", default=None)
+    parser.add_argument("--neutral-case-ids", action="store_true", help="Do not expose source filenames in generated case/session identifiers.")
     args = parser.parse_args()
 
-    cases = discover_pcaps(args.input_dir, args.dataset_id)
+    cases = discover_pcaps(args.input_dir, args.dataset_id, args.neutral_case_ids)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     summary = [parse_case(case_id, pcap, args.output_dir) for case_id, pcap in cases]
     (args.output_dir / "parse_all_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

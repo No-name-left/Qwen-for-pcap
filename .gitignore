@@ -26,6 +26,11 @@ env/
 *.crt
 *.token
 *.secret
+*.xlsx
+*.xls
+*结果对照表*
+*answer_key*
+*ground_truth*
 
 # Generated runtime artifacts
 outputs/*
@@ -62,6 +67,11 @@ outputs/suricata_logs/
 outputs/**/*.response.json
 outputs/**/*raw_response*
 outputs/**/*api_raw*
+phase1_predictions.csv
+predictions.jsonl
+failed_records.jsonl
+parse_errors.jsonl
+run_state.json
 
 # Raw packet captures and downloaded datasets stay local.
 datasets/raw/

@@ -20,6 +20,14 @@ from qwen35_rag_utils import (
 
 PROMPT_VERSION = "observable_timing_boundary_rag_v4"
 TECHNIQUE_CODES = ["TA43_01", "TA43_02", "TA01_01", "TA01_02", "TA03_01", "TA11_01", "TA11_02", "TN01_01"]
+STAGE_CODES = ["TA43", "TA01", "TA03", "TA11", "TN01"]
+TECHNIQUE_TO_STAGE = {
+    "TA43_01": "TA43", "TA43_02": "TA43",
+    "TA01_01": "TA01", "TA01_02": "TA01",
+    "TA03_01": "TA03",
+    "TA11_01": "TA11", "TA11_02": "TA11",
+    "TN01_01": "TN01",
+}
 TIMING_KEYS = [
     "duration", "packet_rate", "byte_rate", "time_span",
     "scan_start", "scan_end", "scan_duration", "port_probe_count", "probe_rate",
@@ -169,6 +177,29 @@ def instruction_block() -> str:
     )
 
 
+def phase1_instruction_block() -> str:
+    return (
+        f"PROMPT_VERSION: {PROMPT_VERSION}\n"
+        "Classify exactly one PCAP session or behavioral group for Phase-1 scoring. Predict stage_code first; technique_guess is optional best-effort detail and never overrides stage_code.\n"
+        "Return exactly one JSON object and no Markdown, Thinking Process, or text outside JSON.\n"
+        "The record is primary evidence. RAG is decision-boundary guidance only; when RAG conflicts with observed behavior, follow the record.\n"
+        "Never use an answer table, ground truth, expected label, or any label-bearing evaluation artifact.\n"
+        "Use only network-visible evidence from this record and same-PCAP aggregates. Do not infer host execution, persistence success, identity, reputation, or hidden encrypted payload.\n"
+        "Missing payload is not proof of normality. For encrypted or metadata-only traffic, use direction, repetition, timing, fanout, failures, byte patterns, DNS/SNI, and endpoint roles without inventing content.\n"
+        "Periodicity alone is not C2. Ordinary HTTP/TLS/DNS, update traffic, telemetry, NTP, and a few normal logins may be TN01.\n"
+        "Stage meanings: TA43=reconnaissance or vulnerability discovery; TA01=credential attack or exploitation attempt; TA03=network-visible payload delivery or implant placement; TA11=backdoor access, callback, beaconing, or C2; TN01=normal or insufficient attack evidence.\n"
+        "Technique mapping: TA43_01/TA43_02->TA43; TA01_01/TA01_02->TA01; TA03_01->TA03; TA11_01/TA11_02->TA11; TN01_01->TN01.\n"
+        "TA43 needs target/port fanout, service fingerprinting, scanner paths/plugins, CVE probes, or other discovery behavior.\n"
+        "TA01 needs repeated credential failures/credential fields or exploit-specific payload, URI, injection, traversal, upload, or vulnerability-trigger evidence.\n"
+        "TA03 needs network-visible delivery/upload or implant-placement evidence; never claim host-side installation succeeded.\n"
+        "TA11 needs attacker-initiated access to an existing backdoor or victim-initiated repeated callback/beacon/C2 behavior supported by endpoint, timing, direction, and byte-pattern evidence.\n"
+        "When evidence is ambiguous, choose the best-supported stage and lower confidence. TN01 is allowed when attack evidence remains insufficient after behavioral review.\n"
+        f"Allowed stage_code values: {', '.join(STAGE_CODES)}. Allowed non-null technique_guess values: {', '.join(TECHNIQUE_CODES)}.\n"
+        "Required JSON fields: record_id, pcap_id, record_type, start_time, end_time, src_ip, src_port, dst_ip, dst_port, stage_code, technique_guess, confidence, reason.\n"
+        "technique_guess may be null. confidence must be 0..1 and reason must be one short sentence grounded in observable PCAP evidence.\n"
+    )
+
+
 def rag_section(snippets: list[dict[str, Any]], profile: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     max_chunks = int(profile.get("max_rag_chunks", 5))
     per_chunk = int(profile.get("max_rag_chars_per_chunk", 550))
@@ -188,15 +219,14 @@ def rag_section(snippets: list[dict[str, Any]], profile: dict[str, Any]) -> tupl
     }
 
 
-def build_prompt(
+def _build_budgeted_prompt(
     record: dict[str, Any],
-    task: str,
     snippets: list[dict[str, Any]] | None,
     profile: dict[str, Any],
+    prefix: str,
+    task_name: str,
     retrieval_meta: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    if task != "technique":
-        raise ValueError("only technique classification prompts are supported; stage_code is derived deterministically")
     configured_chars = int(profile.get("max_prompt_chars", 10**9))
     token_chars = int(profile.get("max_prompt_tokens", 3500)) * 3
     max_chars = min(configured_chars, token_chars)
@@ -205,7 +235,6 @@ def build_prompt(
     core_json = json.dumps(core, ensure_ascii=False, separators=(",", ":"))
     observable = compact_observable(record, max(600, session_limit - len(core_json)))
     observable_json = json.dumps(observable, ensure_ascii=False, separators=(",", ":"))
-    prefix = instruction_block()
     rag_block, meta = rag_section(snippets or [], profile) if snippets is not None else ("", {"rag_chunks_included": 0, "targeted_boundary_doc_ids": []})
     suffix = "OBSERVABLE_EVIDENCE_FROM_PCAP:\n" + observable_json + "\nCLASSIFICATION_RECORD:\n" + core_json + "\n"
     prompt = prefix + rag_block + suffix
@@ -241,6 +270,7 @@ def build_prompt(
     retrieval_meta = retrieval_meta or {}
     meta.update({
         "prompt_version": PROMPT_VERSION,
+        "task": task_name,
         "runtime_profile": profile.get("name", "inline"),
         "prompt_chars": len(prompt),
         "estimated_prompt_tokens": estimate_tokens(prompt),
@@ -252,6 +282,7 @@ def build_prompt(
         "targeted_rag_triggers": retrieval_meta.get("targeted_rag_triggers", []),
         "targeted_boundary_cards": retrieval_meta.get("targeted_boundary_cards", meta.get("targeted_boundary_doc_ids", [])),
     })
+    meta["retrieved_rag_chunks"] = meta["rag_chunks_included"]
     meta["prompt_budget_summary"] = {
         "prompt_chars": meta["prompt_chars"],
         "estimated_prompt_tokens": meta["estimated_prompt_tokens"],
@@ -262,6 +293,32 @@ def build_prompt(
         "timing_fields_included": meta["timing_fields_included"],
     }
     return prompt, meta
+
+
+def build_prompt(
+    record: dict[str, Any],
+    task: str,
+    snippets: list[dict[str, Any]] | None,
+    profile: dict[str, Any],
+    retrieval_meta: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any]]:
+    if task != "technique":
+        raise ValueError("only technique classification prompts are supported; stage_code is derived deterministically")
+    return _build_budgeted_prompt(
+        record, snippets, profile, instruction_block(), "technique", retrieval_meta,
+    )
+
+
+def build_phase1_prompt(
+    record: dict[str, Any],
+    snippets: list[dict[str, Any]] | None,
+    profile: dict[str, Any],
+    retrieval_meta: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Build a stage-first Phase-1 prompt without changing the technique-only API."""
+    return _build_budgeted_prompt(
+        record, snippets, profile, phase1_instruction_block(), "phase1_stage_first", retrieval_meta,
+    )
 
 
 def prompt_text(
