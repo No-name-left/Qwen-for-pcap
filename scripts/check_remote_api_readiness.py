@@ -67,12 +67,12 @@ def main() -> int:
     args = parser.parse_args()
     load_env_file(ROOT / ".env")
     load_env_file(ROOT / ".env.local")
-    base_url = os.environ.get("BASE_URL") or os.environ.get("LLM_BASE_URL")
-    model = os.environ.get("MODEL") or os.environ.get("LLM_MODEL_NAME")
-    api_key = os.environ.get("API_KEY") or os.environ.get("LLM_API_KEY") or os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACEHUB_API_TOKEN")
+    base_url = os.environ.get("OPENAI_BASE_URL") or os.environ.get("BASE_URL") or os.environ.get("LLM_BASE_URL")
+    model = os.environ.get("OPENAI_MODEL") or os.environ.get("MODEL") or os.environ.get("LLM_MODEL_NAME")
+    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("API_KEY") or os.environ.get("LLM_API_KEY") or os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACEHUB_API_TOKEN")
     key_length = len(api_key) if api_key else 0
     base = base_url_info(base_url)
-    missing = [name for name, value in (("BASE_URL/LLM_BASE_URL", base_url), ("MODEL/LLM_MODEL_NAME", model), ("API_KEY/LLM_API_KEY/HF_TOKEN", api_key)) if not value]
+    missing = [name for name, value in (("OPENAI_BASE_URL/BASE_URL/LLM_BASE_URL", base_url), ("OPENAI_MODEL/MODEL/LLM_MODEL_NAME", model), ("OPENAI_API_KEY/API_KEY/LLM_API_KEY/HF_TOKEN", api_key)) if not value]
     report: dict[str, Any] = {
         "dry_run": args.dry_run, "configuration": {
             "base_url": base, "model_configured": bool(model), "model_name": model if model else None,
@@ -157,7 +157,7 @@ def main() -> int:
         f"- Ready for tiny real paired eval: {report['ready_for_tiny_real_eval']}", "", "## Required before evaluation", "",
     ]
     lines.extend(f"- {item}" for item in needs) if needs else lines.append("- None detected by this check.")
-    lines.extend(["", "Set variables only in the shell or untracked `.env.local`: `LLM_BASE_URL`, `LLM_MODEL_NAME`, `LLM_API_KEY`. Confirm provider pricing/credits separately; this script never exposes the key."])
+    lines.extend(["", "Set variables only in the shell or untracked `.env.local`; OPENAI_*, BASE_URL/MODEL/API_KEY, and LLM_* aliases are supported. Confirm provider pricing/credits separately; this script never exposes the key."])
     (args.output_dir / "api_readiness_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(json.dumps({"status": status_text, "missing": missing, "requests_made": report["requests_made"], "ready_for_tiny_real_eval": report["ready_for_tiny_real_eval"], "api_key_present": bool(api_key), "api_key_length": key_length}))
     return 0 if args.dry_run or report["ready_for_tiny_real_eval"] or bool(missing) else 1

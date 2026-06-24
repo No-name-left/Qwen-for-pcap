@@ -74,9 +74,9 @@ llm_base_url_set=false
 llm_model_name_set=false
 llm_api_key_set=false
 hf_token_set=false
-if [ -n "${BASE_URL:-${LLM_BASE_URL:-}}" ]; then llm_base_url_set=true; fi
-if [ -n "${MODEL:-${LLM_MODEL_NAME:-}}" ]; then llm_model_name_set=true; fi
-if [ -n "${API_KEY:-${LLM_API_KEY:-}}" ]; then llm_api_key_set=true; fi
+if [ -n "${OPENAI_BASE_URL:-${BASE_URL:-${LLM_BASE_URL:-}}}" ]; then llm_base_url_set=true; fi
+if [ -n "${OPENAI_MODEL:-${MODEL:-${LLM_MODEL_NAME:-}}}" ]; then llm_model_name_set=true; fi
+if [ -n "${OPENAI_API_KEY:-${API_KEY:-${LLM_API_KEY:-}}}" ]; then llm_api_key_set=true; fi
 if [ -n "${HF_TOKEN:-}" ] || [ -n "${HUGGINGFACEHUB_API_TOKEN:-}" ]; then hf_token_set=true; fi
 
 {
@@ -101,9 +101,9 @@ if [ -n "${HF_TOKEN:-}" ] || [ -n "${HUGGINGFACEHUB_API_TOKEN:-}" ]; then hf_tok
   echo
   echo "| Variable | Configured | Value printed |"
   echo "| --- | --- | --- |"
-  echo "| BASE_URL / LLM_BASE_URL | $llm_base_url_set | no |"
-  echo "| MODEL / LLM_MODEL_NAME | $llm_model_name_set | no |"
-  echo "| API_KEY / LLM_API_KEY | $llm_api_key_set | no |"
+  echo "| OPENAI_BASE_URL / BASE_URL / LLM_BASE_URL | $llm_base_url_set | no |"
+  echo "| OPENAI_MODEL / MODEL / LLM_MODEL_NAME | $llm_model_name_set | no |"
+  echo "| OPENAI_API_KEY / API_KEY / LLM_API_KEY | $llm_api_key_set | no |"
   echo "| HF_TOKEN / HUGGINGFACEHUB_API_TOKEN | $hf_token_set | no |"
   echo
   echo "No OpenAI-compatible, Hugging Face, or other online model endpoint was called."

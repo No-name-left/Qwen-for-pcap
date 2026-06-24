@@ -71,6 +71,21 @@ def enrich_public(row: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
+def refresh_pcap_records(rows: list[dict[str, Any]], records_path: Path) -> list[dict[str, Any]]:
+    """Replace stale PCAP-derived evidence with cards rebuilt by the current pipeline."""
+    if not records_path.exists():
+        return rows
+    refreshed = {item["record_id"]: item for item in load_json(records_path)}
+    output = []
+    for row in rows:
+        item = dict(row)
+        current = refreshed.get(str(item.get("record_id")))
+        if current is not None and item.get("record_type") != "flow_only":
+            item["classification_record"] = clean_record(current)
+        output.append(item)
+    return output
+
+
 def wireshark_rows(records_path: Path) -> list[dict[str, Any]]:
     source_map = {
         "wireshark_nmap_001_nmap_OS_scan": ("datasets/public/wireshark_nmap/raw/nmap_OS_scan.pcap", "nmap -O -Pn 192.168.100.102"),
@@ -176,6 +191,8 @@ def anonymize_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         classification_record["record_id"] = record_alias
         classification_record["session_id"] = record_alias
         classification_record["pcap_id"] = pcap_alias
+        if isinstance(classification_record.get("pcap_summary"), dict):
+            classification_record["pcap_summary"] = {**classification_record["pcap_summary"], "pcap_id": pcap_alias}
         classification_record.pop("pcap", None)
         item.update({
             "record_id": record_alias, "pcap_id": pcap_alias,
@@ -192,10 +209,15 @@ def main() -> int:
     parser.add_argument("--wireshark-records", type=Path, default=ROOT / "outputs/data_completion/wireshark_nmap_cards/classification_records.json")
     parser.add_argument("--synthetic-records", type=Path, default=ROOT / "outputs/data_completion/synthetic_cards/classification_records.json")
     parser.add_argument("--synthetic-generation-report", type=Path, default=ROOT / "outputs/data_completion/synthetic_generation_report.json")
+    parser.add_argument(
+        "--refreshed-pcap-records", type=Path,
+        default=ROOT / "outputs/zeek_rebuild/classification_records/classification_records_all.json",
+    )
     parser.add_argument("--output-dir", type=Path, default=ROOT / "datasets/public_eval")
     args = parser.parse_args()
 
     existing = [enrich_public(row) for row in load_jsonl(args.coverage_records) if row.get("dataset_id") != "wireshark_nmap"]
+    existing = refresh_pcap_records(existing, args.refreshed_pcap_records)
     external_new = wireshark_rows(args.wireshark_records)
     public_rows = existing + external_new
     write_jsonl(args.coverage_records, public_rows)

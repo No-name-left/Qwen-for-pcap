@@ -1,7 +1,7 @@
 # Real API paired-evaluation token and cost plan
 
 - Candidate records: `datasets/public_eval/real_api_candidate_records.jsonl`
-- Prompt version: `boundary_rag_v2`
+- Prompt version: `observable_boundary_rag_v3`
 - Runtime profile: `ascend_openeuler_qwen35_27b`
 - Thinking: off
 - Expected output: 128 tokens/call (profile maximum 384)
@@ -9,27 +9,27 @@
 
 | Scenario | Records | Calls | Avg chars | Avg input tokens | Total input | Total output | Cost 0% | Cost 10% | Cost 20% |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `smoke_5` | 5 | 10 | 3883.5 | 1294.9 | 12949 | 1280 | $0.006957 | $0.007652 | $0.008348 |
-| `per_class_tiny_3` | 24 | 48 | 3832.8 | 1277.9 | 61340 | 6144 | $0.033148 | $0.036462 | $0.039777 |
-| `small_paired_10` | 10 | 20 | 3805.7 | 1269.0 | 25379 | 2560 | $0.013758 | $0.015133 | $0.016509 |
-| `medium_paired_20` | 20 | 40 | 3838.1 | 1279.7 | 51187 | 5120 | $0.027644 | $0.030409 | $0.033173 |
+| `smoke_5` | 5 | 10 | 4695.0 | 1565.4 | 15654 | 1280 | $0.007768 | $0.008545 | $0.009322 |
+| `per_class_tiny_3` | 24 | 48 | 4651.0 | 1550.7 | 74434 | 6144 | $0.037076 | $0.040783 | $0.044491 |
+| `small_paired_10` | 10 | 20 | 4560.5 | 1520.5 | 30411 | 2560 | $0.015267 | $0.016794 | $0.018321 |
+| `medium_paired_20` | 20 | 40 | 4559.5 | 1520.2 | 60808 | 5120 | $0.030530 | $0.033583 | $0.036636 |
 
 ## Retry sensitivity
 
 | Scenario | Failed/retried | Adjusted input tokens | Adjusted output tokens | Estimated USD |
 |---|---:|---:|---:|---:|
-| `smoke_5` | 0% | 12949 | 1280 | $0.006957 |
-| `smoke_5` | 10% | 14244 | 1408 | $0.007652 |
-| `smoke_5` | 20% | 15539 | 1536 | $0.008348 |
-| `per_class_tiny_3` | 0% | 61340 | 6144 | $0.033148 |
-| `per_class_tiny_3` | 10% | 67474 | 6758 | $0.036462 |
-| `per_class_tiny_3` | 20% | 73608 | 7373 | $0.039777 |
-| `small_paired_10` | 0% | 25379 | 2560 | $0.013758 |
-| `small_paired_10` | 10% | 27917 | 2816 | $0.015133 |
-| `small_paired_10` | 20% | 30455 | 3072 | $0.016509 |
-| `medium_paired_20` | 0% | 51187 | 5120 | $0.027644 |
-| `medium_paired_20` | 10% | 56306 | 5632 | $0.030409 |
-| `medium_paired_20` | 20% | 61424 | 6144 | $0.033173 |
+| `smoke_5` | 0% | 15654 | 1280 | $0.007768 |
+| `smoke_5` | 10% | 17219 | 1408 | $0.008545 |
+| `smoke_5` | 20% | 18785 | 1536 | $0.009322 |
+| `per_class_tiny_3` | 0% | 74434 | 6144 | $0.037076 |
+| `per_class_tiny_3` | 10% | 81877 | 6758 | $0.040783 |
+| `per_class_tiny_3` | 20% | 89321 | 7373 | $0.044491 |
+| `small_paired_10` | 0% | 30411 | 2560 | $0.015267 |
+| `small_paired_10` | 10% | 33452 | 2816 | $0.016794 |
+| `small_paired_10` | 20% | 36493 | 3072 | $0.018321 |
+| `medium_paired_20` | 0% | 60808 | 5120 | $0.030530 |
+| `medium_paired_20` | 10% | 66889 | 5632 | $0.033583 |
+| `medium_paired_20` | 20% | 72970 | 6144 | $0.036636 |
 
 ## Assumptions and risks
 

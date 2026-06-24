@@ -7,6 +7,7 @@
 - Ground truth and label confidence remain outside `CLASSIFICATION_RECORD` and outside retrieved snippets.
 - Default execution only creates prompts. API calls require the explicit `--run-api` switch.
 - Prompt/mock preparation may use up to 64 records. Real API execution is safety-gated to at most two paired records (four calls), `RUN_REAL_API_TEST=1`, and a passing readiness report.
+- `run_public_eval_api.py` retains that two-record ceiling. Guarded 8-12 record strict evaluation uses `run_small_api_eval.py`, which must pass its two-record smoke phase before starting the strict phase.
 - Current prompt version is `observable_boundary_rag_v3`; every prompt manifest and evaluation context records it.
 - Targeted RAG cards are selected from record features for the five named confusion pairs. They are ordered before ordinary top-k snippets but remain subordinate to record evidence.
 - Runtime-profile budgets cap session context, snippet count/size and final prompt length.
@@ -36,7 +37,20 @@ python3 scripts/run_public_eval_api.py \
 python3 scripts/evaluate_rag_vs_no_rag.py
 ```
 
-`BASE_URL` / `MODEL` / `API_KEY` and `LLM_BASE_URL` / `LLM_MODEL_NAME` / `LLM_API_KEY` are equivalent. No key is printed or written to evaluation context.
+Guarded smoke plus strict online evaluation:
+
+```bash
+# Prompt/cost preparation only; no API call
+python3 scripts/run_small_api_eval.py --dry-run --phase all --max-records 12
+
+# Two-record smoke, then 8-12 strict external-high records only if smoke passes
+RUN_REAL_API_TEST=1 python3 scripts/run_small_api_eval.py \
+  --run-api --phase all --max-records 12 --resume
+```
+
+The staged runner records request IDs, latency, token usage, parse/label status, prompt evidence metadata, paired results, cost, and tiered reports. It forces Qwen thinking off and stops if the provider reports nonzero reasoning tokens.
+
+`OPENAI_BASE_URL` / `OPENAI_MODEL` / `OPENAI_API_KEY`, `BASE_URL` / `MODEL` / `API_KEY`, and the corresponding `LLM_*` aliases are equivalent. No key is printed or written to evaluation context.
 
 ## Outputs
 

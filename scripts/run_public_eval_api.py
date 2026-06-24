@@ -15,7 +15,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from build_qwen35_session_prompts import PROMPT_VERSION, build_prompt
-from build_rag_query import BOUNDARY_DOCS, detect_confusion_groups, record_terms
+from build_rag_query import detect_confusion_groups, record_terms, targeted_rag_metadata
 from qwen35_rag_utils import DEFAULT_RUNTIME_PROFILES, load_env_file, load_runtime_profile
 from retrieve_rag import retrieve
 
@@ -55,11 +55,15 @@ def write_prompts(records: list[dict[str, Any]], output_dir: Path, profile: dict
         evidence = item["classification_record"]
         terms, rules, low_signal = record_terms(evidence)
         confusion_groups = detect_confusion_groups(evidence)
+        triggers, targeted_docs, used_fields = targeted_rag_metadata(evidence, confusion_groups)
         queries.append({
             "record_id": item["record_id"], "pcap_id": item["pcap_id"], "record_type": item["record_type"],
             "query": " ".join(terms), "query_terms": terms, "rules": rules, "low_signal": low_signal,
             "confusion_groups": confusion_groups,
-            "targeted_boundary_doc_ids": [BOUNDARY_DOCS[group] for group in confusion_groups],
+            "targeted_boundary_doc_ids": targeted_docs,
+            "targeted_rag_triggers": triggers,
+            "targeted_boundary_cards": targeted_docs,
+            "indicator_fields_used": used_fields,
         })
     retrieval_rows = retrieve(queries, chunks, 5)
     retrieval_map = {item["record_id"]: item.get("snippets", []) for item in retrieval_rows}
@@ -72,7 +76,13 @@ def write_prompts(records: list[dict[str, Any]], output_dir: Path, profile: dict
         manifest = []
         for item in records:
             snippets = None if prompt_type == "no_rag" else retrieval_map.get(item["record_id"], [])
-            text, prompt_meta = build_prompt(item["classification_record"], "technique", snippets, profile)
+            retrieval_meta = next((row for row in retrieval_rows if row["record_id"] == item["record_id"]), {})
+            prompt_retrieval_meta = retrieval_meta if prompt_type == "rag" else {
+                "indicator_fields_used": retrieval_meta.get("indicator_fields_used", []),
+                "targeted_rag_triggers": [],
+                "targeted_boundary_cards": [],
+            }
+            text, prompt_meta = build_prompt(item["classification_record"], "technique", snippets, profile, prompt_retrieval_meta)
             path = prompt_dir / f"{safe_name(item['record_id'])}.txt"
             path.write_text(text, encoding="utf-8")
             try:
@@ -91,9 +101,9 @@ def write_prompts(records: list[dict[str, Any]], output_dir: Path, profile: dict
 
 def api_env() -> tuple[str | None, str | None, str | None]:
     return (
-        os.environ.get("BASE_URL") or os.environ.get("LLM_BASE_URL"),
-        os.environ.get("MODEL") or os.environ.get("LLM_MODEL_NAME"),
-        os.environ.get("API_KEY") or os.environ.get("LLM_API_KEY"),
+        os.environ.get("OPENAI_BASE_URL") or os.environ.get("BASE_URL") or os.environ.get("LLM_BASE_URL"),
+        os.environ.get("OPENAI_MODEL") or os.environ.get("MODEL") or os.environ.get("LLM_MODEL_NAME"),
+        os.environ.get("OPENAI_API_KEY") or os.environ.get("API_KEY") or os.environ.get("LLM_API_KEY"),
     )
 
 

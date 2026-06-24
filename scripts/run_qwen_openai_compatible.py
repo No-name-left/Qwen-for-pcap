@@ -26,6 +26,10 @@ class ModelResultValidationError(ValueError):
     pass
 
 
+class ThinkingModeError(RuntimeError):
+    pass
+
+
 def load_config(path: Path) -> dict:
     if path.exists():
         return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -55,7 +59,8 @@ def env_from_config(cfg: dict, section: str, key: str):
 
 def api_key_from_env(cfg: dict):
     return (
-        os.environ.get("API_KEY")
+        os.environ.get("OPENAI_API_KEY")
+        or os.environ.get("API_KEY")
         or os.environ.get("LLM_API_KEY")
         or env_from_config(cfg, "provider", "api_key_env")
         or os.environ.get("HF_TOKEN")
@@ -131,6 +136,27 @@ def extract_record_id_from_prompt(prompt_text: str, fallback: str) -> str:
     if isinstance(record, dict):
         return str(record.get("record_id") or record.get("session_id") or fallback)
     return fallback
+
+
+def extract_prompt_version(prompt_text: str) -> str:
+    prefix = "PROMPT_VERSION:"
+    for line in prompt_text.splitlines()[:5]:
+        if line.startswith(prefix):
+            return line.split(":", 1)[1].strip()
+    return "unknown"
+
+
+def usage_dict(response: Any) -> dict[str, Any]:
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return {}
+    if hasattr(usage, "model_dump"):
+        return usage.model_dump()
+    return {
+        key: getattr(usage, key)
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+        if getattr(usage, key, None) is not None
+    }
 
 
 def extract_record_from_prompt(prompt_text: str) -> dict[str, Any]:
@@ -239,6 +265,8 @@ def classify_error(error: str, exc_type: str = "") -> str:
         return "JSON parse failure"
     if "modelresultvalidationerror" in low or "invalid technique code" in low or "record_id mismatch" in low:
         return "result validation failure"
+    if "thinkingmodeerror" in low or "thinking disabled but provider reported" in low:
+        return "thinking mode policy failure"
     if "empty" in low:
         return "empty response"
     if any(code in low for code in ("500", "502", "503", "504")):
@@ -302,7 +330,8 @@ def main() -> int:
     mock_mode = bool(profile.get("mock", False))
     generation = cfg.get("generation", {}) if isinstance(cfg.get("generation"), dict) else {}
     base_url = profile.get("base_url") if mock_mode else (
-        os.environ.get("BASE_URL")
+        os.environ.get("OPENAI_BASE_URL")
+        or os.environ.get("BASE_URL")
         or os.environ.get("LLM_BASE_URL")
         or env_from_config(cfg, "provider", "base_url_env")
         or profile.get("base_url")
@@ -310,7 +339,8 @@ def main() -> int:
     )
     api_key = api_key_from_env(cfg)
     model = profile.get("model") if mock_mode else (
-        os.environ.get("MODEL")
+        os.environ.get("OPENAI_MODEL")
+        or os.environ.get("MODEL")
         or os.environ.get("LLM_MODEL_NAME")
         or env_from_config(cfg, "provider", "model_name_env")
         or profile.get("model")
@@ -343,9 +373,9 @@ def main() -> int:
             "# Qwen3.5-27B run summary\n\n"
             "Status: not_started\n\n"
             "Missing API configuration. Set:\n\n"
-            "- `API_KEY` or `LLM_API_KEY`\n"
-            "- `BASE_URL` or `LLM_BASE_URL`\n"
-            "- `MODEL` or `LLM_MODEL_NAME`\n\n"
+            "- `OPENAI_API_KEY`, `API_KEY`, or `LLM_API_KEY`\n"
+            "- `OPENAI_BASE_URL`, `BASE_URL`, or `LLM_BASE_URL`\n"
+            "- `OPENAI_MODEL`, `MODEL`, or `LLM_MODEL_NAME`\n\n"
             "No model call was made and no result was fabricated.\n",
             encoding="utf-8",
         )
@@ -376,8 +406,16 @@ def main() -> int:
     parsed_dir.mkdir(parents=True, exist_ok=True)
     result_path = args.output_dir / args.result_name
     existing_results: dict[str, dict[str, Any]] = {}
+    existing_status: dict[str, dict[str, Any]] = {}
     if args.resume:
         loaded_existing = load_existing_parsed_results(parsed_dir, result_path)
+        stats_path = args.output_dir / "run_stats.json"
+        if stats_path.exists():
+            try:
+                prior_stats = json.loads(stats_path.read_text(encoding="utf-8"))
+                existing_status = {row["record_id"]: row for row in prior_stats.get("rows", []) if row.get("record_id")}
+            except (json.JSONDecodeError, OSError):
+                existing_status = {}
         prompt_record_ids = {record_id for _, record_id, _ in prompts}
         for record_id, item in loaded_existing.items():
             if record_id not in prompt_record_ids:
@@ -400,15 +438,24 @@ def main() -> int:
         error_path = raw_dir / f"error_batch_{idx:03d}.txt"
         parsed_path = parsed_dir / f"parsed_batch_{idx:03d}.json"
         if args.resume and record_id in existing_results:
+            prior = existing_status.get(record_id, {})
             rows.append({
                 "batch": idx,
                 "record_id": record_id,
                 "prompt": display_path(prompt_path),
+                "prompt_version": extract_prompt_version(prompt_text),
                 "status": "skipped_existing",
                 "error": "",
                 "error_category": "",
                 "records": 1,
                 "invalid_codes": 0,
+                "parse_success": True,
+                "valid_label": True,
+                "attempts_made": prior.get("attempts_made", 0),
+                "latency_seconds": prior.get("latency_seconds"),
+                "request_id": prior.get("request_id"),
+                "response_id": prior.get("response_id"),
+                "usage": prior.get("usage", {}),
             })
             continue
         status = "failed"
@@ -416,7 +463,16 @@ def main() -> int:
         content = ""
         records = 0
         invalid_codes_for_batch = 0
+        parse_success = False
+        valid_label = False
+        attempts_made = 0
+        latency_seconds = 0.0
+        request_id = None
+        response_id = None
+        usage: dict[str, Any] = {}
         for attempt in range(args.retries + 1):
+            attempts_made += 1
+            attempt_started = time.perf_counter()
             try:
                 if mock_mode:
                     content = json.dumps(mock_result(prompt_text, record_id), ensure_ascii=False)
@@ -436,20 +492,34 @@ def main() -> int:
                         }
                     response = client.chat.completions.create(**request_kwargs)
                     content = response.choices[0].message.content or ""
+                    request_id = getattr(response, "_request_id", None) or getattr(response, "id", None)
+                    response_id = getattr(response, "id", None)
+                    usage = usage_dict(response)
+                    reasoning_tokens = int((usage.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0)
+                    if not enable_thinking and reasoning_tokens:
+                        raise ThinkingModeError(
+                            f"thinking disabled but provider reported {reasoning_tokens} reasoning tokens"
+                        )
                 raw_path.write_text(content, encoding="utf-8")
                 (raw_dir / f"raw_batch_{idx:03d}_attempt_{attempt + 1:02d}.txt").write_text(content, encoding="utf-8")
                 parsed = parse_json_objects(content)
+                parse_success = True
                 parsed = validate_technique_results(parsed, record_id)
+                valid_label = True
                 parsed_path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
                 all_results.extend(parsed)
                 records = len(parsed)
                 status = "success"
+                latency_seconds += time.perf_counter() - attempt_started
                 break
             except Exception as exc:
+                latency_seconds += time.perf_counter() - attempt_started
+                request_id = request_id or getattr(exc, "request_id", None)
                 error = str(exc)
                 category = classify_error(error, type(exc).__name__)
                 error_path.write_text(f"ERROR: {type(exc).__name__}: {error}\n", encoding="utf-8")
-                if attempt == args.retries:
+                final_attempt = attempt == args.retries or isinstance(exc, ThinkingModeError)
+                if final_attempt:
                     if isinstance(exc, (json.JSONDecodeError, ModelOutputParseError)):
                         json_parse_failures += 1
                     if isinstance(exc, ModelResultValidationError) and "invalid technique code" in error:
@@ -469,16 +539,27 @@ def main() -> int:
                     })
                     if category in {"401 unauthorized", "402 quota depleted"}:
                         stop_after_batch = True
+                    if isinstance(exc, ThinkingModeError):
+                        stop_after_batch = True
+                    break
                 time.sleep(2 * (attempt + 1))
         rows.append({
             "batch": idx,
             "record_id": record_id,
             "prompt": display_path(prompt_path),
+            "prompt_version": extract_prompt_version(prompt_text),
             "status": status,
             "error": error,
             "error_category": classify_error(error) if error else "",
             "records": records,
             "invalid_codes": invalid_codes_for_batch,
+            "parse_success": parse_success,
+            "valid_label": valid_label,
+            "attempts_made": attempts_made,
+            "latency_seconds": round(latency_seconds, 6),
+            "request_id": request_id,
+            "response_id": response_id,
+            "usage": usage,
         })
         summary_path = args.output_dir / args.summary_name
         lines = [
