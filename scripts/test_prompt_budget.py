@@ -25,6 +25,9 @@ def main() -> int:
         "record_id": "budget::scan-web-auth-callback", "pcap_id": "fixture.pcap", "record_type": "scan_group",
         "src_ip": "10.0.0.8", "dst_ip": "10.0.0.9", "service": "https",
         "unique_dst_ports": 181, "failed_conn_rate": 0.88, "same_src_conn_count": 200,
+        "scan_duration": 8.5, "time_span": 8.5, "port_probe_count": 181,
+        "probe_rate": 21.2941, "burstiness_score": 0.72,
+        "inter_arrival_summary": {"count": 180, "median": 0.04, "mean": 0.047, "std": 0.03},
         "http_summary": {"uris": [f"/very/long/scanner/path/{index}?q=" + "x" * 180 for index in range(100)], "note": "Nikto CVE probe command injection webshell"},
         "dns_summary": {"queries": [f"beacon-{index}.example.invalid" for index in range(100)]},
         "tls_summary": {"sni": [f"fixed-{index}.example.invalid" for index in range(100)]},
@@ -50,10 +53,11 @@ def main() -> int:
     assert meta["estimated_prompt_tokens"] <= int(profile["max_prompt_tokens"])
     assert meta["prompt_version"] == PROMPT_VERSION
     assert meta["targeted_boundary_doc_ids"]
-    assert "PROMPT_VERSION: observable_boundary_rag_v3" in prompt
+    assert "PROMPT_VERSION: observable_timing_boundary_rag_v4" in prompt
     assert "OBSERVABLE_EVIDENCE_FROM_PCAP:" in prompt
     assert "xp_cmdshell" in prompt
     assert "CLASSIFICATION_RECORD:" in prompt
+    assert "probe_rate" in prompt and "scan_duration" in meta["timing_fields_included"]
     print(json.dumps({"prompt_chars": len(prompt), "estimated_tokens": meta["estimated_prompt_tokens"], "boundaries": meta["targeted_boundary_doc_ids"], "truncated": meta["budget_truncated"]}, ensure_ascii=False))
     return 0
 

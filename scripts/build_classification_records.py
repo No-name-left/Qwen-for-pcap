@@ -27,7 +27,7 @@ OBSERVABLE_FIELDS = [
     "suspicious_http_parameters", "suspicious_uri_patterns",
     "exploit_indicators", "vuln_scan_indicators", "auth_indicators",
     "implant_indicators", "backdoor_access_indicators", "c2_indicators",
-    "transferred_files_summary", "pcap_summary",
+    "transferred_files_summary", "benign_periodic_hints", "pcap_summary",
 ]
 
 
@@ -46,6 +46,50 @@ def display_path(path: Path) -> str:
         return str(resolved.relative_to(ROOT))
     except ValueError:
         return str(path)
+
+
+def round_timing(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(value, 6 if abs(value) < 1 else 3)
+
+
+def numeric_pattern(values: list[float]) -> dict[str, Any]:
+    ordered = sorted(values)
+    mean = statistics.mean(ordered) if ordered else None
+    std = statistics.pstdev(ordered) if len(ordered) >= 2 else None
+    cv = std / mean if std is not None and mean else None
+    return {
+        "count": len(ordered), "min": round_timing(ordered[0]) if ordered else None,
+        "median": round_timing(statistics.median(ordered)) if ordered else None,
+        "mean": round_timing(mean), "std": round_timing(std),
+        "p90": round_timing(ordered[int(0.9 * (len(ordered) - 1))]) if ordered else None,
+        "max": round_timing(ordered[-1]) if ordered else None, "cv": round(cv, 3) if cv is not None else None,
+    }
+
+
+def start_intervals(cards: list[dict[str, Any]]) -> list[float]:
+    times = sorted(value for card in cards if (value := as_float(card.get("start_time"))) is not None)
+    return [b - a for a, b in zip(times, times[1:]) if b >= a]
+
+
+def burstiness_score(intervals: list[float]) -> float | None:
+    if len(intervals) < 2:
+        return None
+    mean = statistics.mean(intervals)
+    std = statistics.pstdev(intervals)
+    denominator = std + mean
+    return round((std - mean) / denominator, 3) if denominator else 0.0
+
+
+def indicator_positive(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, list):
+        return bool(value)
+    if isinstance(value, dict):
+        return any(indicator_positive(item) for key, item in value.items() if key not in {"weak_evidence", "auth_protocol", "interval_summary", "beacon_score"})
+    return False
 
 
 def is_scan_candidate(card: dict[str, Any], min_failed_rate: float) -> bool:
@@ -93,6 +137,10 @@ def make_scan_group(group: list[dict[str, Any]], idx: int) -> dict[str, Any]:
     failed = [c for c in group if c.get("conn_state") in FAILED_STATES]
     start_times = [as_float(c.get("start_time")) for c in group if as_float(c.get("start_time")) is not None]
     end_times = [as_float(c.get("end_time")) for c in group if as_float(c.get("end_time")) is not None]
+    scan_start = min(start_times) if start_times else None
+    scan_end = max(end_times or start_times) if start_times else None
+    scan_duration = max(0.0, (scan_end or scan_start or 0) - (scan_start or 0)) if scan_start is not None else None
+    intervals = start_intervals(group)
     first = group[0]
     record = {
         "record_type": "scan_group",
@@ -100,14 +148,22 @@ def make_scan_group(group: list[dict[str, Any]], idx: int) -> dict[str, Any]:
         "session_id": f"{first['pcap_id']}::scan_group::{idx:06d}",
         "pcap_id": first["pcap_id"],
         "parser_source": first.get("parser_source"),
-        "start_time": min(start_times) if start_times else None,
-        "end_time": max(end_times) if end_times else None,
+        "start_time": scan_start,
+        "end_time": scan_end,
+        "scan_start": scan_start,
+        "scan_end": scan_end,
+        "scan_duration": round_timing(scan_duration),
+        "time_span": round_timing(scan_duration),
         "src_ip": first.get("src_ip"),
         "src_port": "multiple",
         "dst_ip": first.get("dst_ip"),
         "dst_port": "multiple",
         "proto": first.get("proto"),
         "session_count": len(group),
+        "port_probe_count": len(group),
+        "probe_rate": round(len(group) / scan_duration, 4) if scan_duration is not None and scan_duration > 0 else None,
+        "inter_arrival_summary": numeric_pattern(intervals),
+        "burstiness_score": burstiness_score(intervals),
         "unique_dst_ports": len(ports),
         "dst_ports_sample": ports[:30],
         "failed_conn_rate": round(len(failed) / len(group), 4) if group else 0.0,
@@ -205,26 +261,31 @@ def group_auth_cards(cards: list[dict[str, Any]], window_seconds: float = 300.0,
             str(card.get("dst_port")), str(card.get("proto")), protocol,
         )
         by_key[key].append(card)
-    return [group for cards_for_key in by_key.values() for group in split_close_time(cards_for_key, window_seconds) if len(group) >= min_attempts]
+    groups = [group for cards_for_key in by_key.values() for group in split_close_time(cards_for_key, window_seconds)]
+    return [group for group in groups if max(
+        len(group),
+        sum(int((card.get("auth_indicators") or {}).get("session_auth_attempt_count") or 0) for card in group),
+    ) >= min_attempts]
 
 
 def make_auth_attempt_group(group: list[dict[str, Any]], idx: int) -> dict[str, Any]:
     first = group[0]
     protocol = inferred_auth_protocol(first) or "unknown"
     indicators = [card.get("auth_indicators") or {} for card in group]
-    per_session_attempts = [max(1, int(item.get("same_src_same_dst_auth_attempts") or 0)) for item in indicators]
-    attempt_count = sum(per_session_attempts)
+    local_attempts = [int(item.get("session_auth_attempt_count") or 0) for item in indicators]
+    attempt_count = max(len(group), sum(local_attempts))
     failed_login_count = sum(int(item.get("failed_login_count") or 0) for item in indicators)
     status_codes = [str(code) for item in indicators for code in item.get("auth_status_codes", [])]
     ftp_codes = [str(code) for item in indicators for code in item.get("ftp_response_codes", [])]
     start, end = time_bounds(group)
     span = max(0.0, (end or start or 0) - (start or 0)) if start is not None else None
+    intervals = start_intervals(group)
     username_seen = any(bool(item.get("username_field_seen")) for item in indicators)
     password_seen = any(bool(item.get("password_field_seen")) for item in indicators)
     ssh_failure = any(bool(item.get("ssh_auth_failure_hint")) for item in indicators)
     repeated = attempt_count >= 5
-    high = repeated and failed_login_count >= 2 and (username_seen or password_seen or ssh_failure)
-    weak_reason = None if high else "Repeated connection metadata lacks enough credential fields or explicit authentication failures."
+    high = repeated and failed_login_count >= 2
+    weak_reason = None if high else "Repeated connection metadata lacks at least two explicit authentication failures."
     auth_group_id = f"{first['pcap_id']}::auth_attempt_group::{idx:06d}"
     group_indicator = {
         "auth_protocol": protocol,
@@ -241,25 +302,39 @@ def make_auth_attempt_group(group: list[dict[str, Any]], idx: int) -> dict[str, 
         "ssh_auth_failure_hint": ssh_failure,
         "http_login_paths": merge_observable_values([item.get("http_login_paths", []) for item in indicators], "http_login_paths"),
         "weak_evidence": not high,
+        "attempt_rate": round(attempt_count / span, 4) if span is not None and span > 0 else None,
+        "inter_attempt_intervals": numeric_pattern(intervals),
     }
-    return {
+    record = {
         "record_type": "auth_attempt_group", "record_id": auth_group_id, "session_id": auth_group_id,
         "auth_group_id": auth_group_id, "pcap_id": first.get("pcap_id"), "parser_source": first.get("parser_source"),
         "start_time": start, "end_time": end, "src_ip": first.get("src_ip"), "src_port": "multiple",
+        "first_attempt": start, "last_attempt": end,
         "dst_ip": first.get("dst_ip"), "dst_port": first.get("dst_port"), "proto": first.get("proto"),
         "service": first.get("service"), "auth_protocol": protocol, "attempt_count": attempt_count,
         "unique_usernames_seen": group_indicator["unique_usernames_seen"], "username_field_seen": username_seen,
         "password_field_seen": password_seen, "failed_login_count": failed_login_count,
         "success_after_failures_hint": group_indicator["success_after_failures_hint"],
         "repeated_login_attempts": repeated, "same_src_same_dst_auth_attempts": attempt_count,
-        "time_span": round(span, 3) if span is not None else None,
-        "attempt_rate": round(attempt_count / max(span, 1.0), 4) if span is not None else None,
+        "time_span": round_timing(span),
+        "attempt_rate": round(attempt_count / span, 4) if span is not None and span > 0 else None,
+        "inter_attempt_intervals": numeric_pattern(intervals),
+        "failure_burst": {
+            "failed_count": failed_login_count,
+            "failure_rate": round(failed_login_count / max(attempt_count, 1), 4),
+            "span_seconds": round_timing(span),
+        },
         "status_code_summary": dict(Counter(status_codes)), "ftp_response_codes": sorted(set(ftp_codes)),
         "ssh_auth_failure_hint": ssh_failure, "http_login_paths": group_indicator["http_login_paths"],
         "weak_evidence_reason": weak_reason, "evidence_tier": "high_auth_behavioral" if high else "weak_auth_evidence",
         "auth_indicators": group_indicator, "member_session_count": len(group),
         "member_session_ids": [card["session_id"] for card in group],
     }
+    for field in ("payload_visibility", "observable_payload_available", "encrypted_protocol", "extraction_warnings", "evidence_limits", "evidence_mapping"):
+        values = [card.get(field) for card in group if card.get(field) not in (None, "", [], {})]
+        if values:
+            record[field] = merge_observable_values(values, field)
+    return record
 
 
 def group_c2_cards(cards: list[dict[str, Any]], min_connections: int = 4) -> list[list[dict[str, Any]]]:
@@ -275,73 +350,101 @@ def group_c2_cards(cards: list[dict[str, Any]], min_connections: int = 4) -> lis
     return [group for group in by_key.values() if len(group) >= min_connections]
 
 
-def numeric_pattern(values: list[float]) -> dict[str, Any]:
-    ordered = sorted(values)
-    mean = statistics.mean(ordered) if ordered else None
-    cv = statistics.pstdev(ordered) / mean if len(ordered) >= 2 and mean else None
-    return {
-        "count": len(ordered), "min": round(ordered[0], 3) if ordered else None,
-        "median": round(statistics.median(ordered), 3) if ordered else None,
-        "p90": round(ordered[int(0.9 * (len(ordered) - 1))], 3) if ordered else None,
-        "max": round(ordered[-1], 3) if ordered else None, "cv": round(cv, 3) if cv is not None else None,
-    }
-
-
 def make_c2_callback_group(group: list[dict[str, Any]], idx: int) -> dict[str, Any]:
     ordered = sorted(group, key=lambda card: as_float(card.get("start_time")) or 0)
     first = ordered[0]
     times = [as_float(card.get("start_time")) for card in ordered]
     times = [value for value in times if value is not None]
-    intervals = [b - a for a, b in zip(times, times[1:]) if b >= a]
+    intervals = start_intervals(ordered)
     interval_pattern = numeric_pattern(intervals)
     interval_cv = interval_pattern.get("cv")
-    periodicity_score = round(1 / (1 + interval_cv), 3) if interval_cv is not None else 0.0
+    regularity_score = round(1 / (1 + interval_cv), 3) if interval_cv is not None else 0.0
     bytes_pattern = numeric_pattern([float((card.get("orig_bytes") or 0) + (card.get("resp_bytes") or 0)) for card in ordered])
     duration_pattern = numeric_pattern([float(card.get("duration") or 0) for card in ordered])
     dns_queries = [query for card in ordered for query in (card.get("dns_summary") or {}).get("queries", [])]
     tls_sni = [name for card in ordered for name in (card.get("tls_summary") or {}).get("server_names", [])]
     repeated_dns = len(dns_queries) >= 3 and len(set(dns_queries)) < len(dns_queries)
     repeated_sni = len(tls_sni) >= 3 and len(set(tls_sni)) < len(tls_sni)
+    client_external = any(bool((card.get("c2_indicators") or {}).get("client_initiated_external")) for card in ordered)
     try:
         unusual_port = int(first.get("dst_port")) not in COMMON_PORTS
     except (TypeError, ValueError):
         unusual_port = False
     small_repeated = len(ordered) >= 4 and (bytes_pattern.get("p90") or 0) <= 8192
-    periodic = len(intervals) >= 3 and periodicity_score >= 0.6
+    interval_scale = interval_pattern.get("median") or interval_pattern.get("mean") or 0
+    periodic = len(intervals) >= 3 and interval_scale >= 1.0 and regularity_score >= 0.6
+    app_blob = " ".join(
+        str(value) for card in ordered
+        for value in [*card.get("http_hosts", []), *card.get("http_uris_sample", [])]
+    ).lower()
+    callback_text_hint = any(word in app_blob for word in ("callback", "beacon", "heartbeat", "checkin", "dummy-c2"))
+    competing_fields = [
+        field for field in ("vuln_scan_indicators", "auth_indicators", "exploit_indicators", "implant_indicators", "backdoor_access_indicators")
+        if any(indicator_positive(card.get(field) or {}) for card in ordered)
+    ]
     score = min(1.0, sum((
         0.2, 0.15 if len(ordered) >= 10 else 0.05, 0.2 if periodic else 0.0,
         0.15 if small_repeated else 0.0, 0.15 if unusual_port else 0.0,
-        0.1 if repeated_dns or repeated_sni else 0.0, 0.05,
+        0.1 if repeated_dns or repeated_sni else 0.0, 0.15 if callback_text_hint else 0.0, 0.05,
     )))
     start, end = time_bounds(ordered)
+    fixed_endpoint_duration = max(0.0, (end or start or 0) - (start or 0)) if start is not None else None
     c2_group_id = f"{first['pcap_id']}::c2_callback_group::{idx:06d}"
-    evidence_tier = "high_callback_behavioral" if len(ordered) >= 5 and score >= 0.65 else "medium_callback_behavioral" if score >= 0.45 else "weak_callback_evidence"
+    high = len(ordered) >= 5 and score >= 0.65 and periodic and (not competing_fields or callback_text_hint)
+    evidence_tier = "high_callback_behavioral" if high else "medium_callback_behavioral" if score >= 0.45 else "weak_callback_evidence"
+    update_like = any(word in app_blob for word in ("update", "telemetry", "health", "wpad", "sync", "ntp"))
+    ntp_like = str(first.get("proto")) == "udp" and str(first.get("dst_port")) == "123"
+    dns_refresh_like = str(first.get("dst_port")) == "53" and repeated_dns
+    benign_periodic_hints = {
+        "common_service_port": str(first.get("dst_port")) in {"53", "80", "123", "443"},
+        "update_or_telemetry_text": update_like,
+        "dns_refresh_like": dns_refresh_like,
+        "ntp_like": ntp_like,
+        "short_burst_not_beacon": bool(interval_scale and interval_scale < 1.0),
+        "periodicity_alone": bool(periodic and not any((unusual_port, repeated_dns, repeated_sni, callback_text_hint))),
+    }
     c2_indicators = {
         "periodic_connections": periodic, "fixed_remote_endpoint": True,
         "small_repeated_payload": small_repeated, "long_lived_connection": (end or 0) - (start or 0) >= 300 if start is not None else False,
         "dns_repeated_query": repeated_dns, "tls_sni_repeated": repeated_sni,
-        "unusual_port": unusual_port, "client_initiated_external": True,
-        "beacon_score": round(score, 3), "interval_summary": interval_pattern,
+        "unusual_port": unusual_port, "source_initiated_fixed_endpoint": True,
+        "client_initiated_external": client_external,
+        "callback_text_hint": callback_text_hint,
+        "beacon_score": round(score, 3), "regularity_score": regularity_score,
+        "fixed_endpoint_duration": round(fixed_endpoint_duration, 3) if fixed_endpoint_duration is not None else None,
+        "interval_summary": interval_pattern,
+        "competing_behavior_fields": competing_fields,
         "matched_keywords": [name for name, hit in (("periodic", periodic), ("fixed endpoint", True), ("small repeated payload", small_repeated), ("unusual port", unusual_port), ("repeated DNS", repeated_dns), ("repeated SNI", repeated_sni)) if hit],
     }
-    return {
+    record = {
         "record_type": "c2_callback_group", "record_id": c2_group_id, "session_id": c2_group_id,
         "c2_group_id": c2_group_id, "pcap_id": first.get("pcap_id"), "parser_source": first.get("parser_source"),
         "start_time": start, "end_time": end, "src_ip": first.get("src_ip"), "src_port": "multiple",
         "dst_ip": first.get("dst_ip"), "dst_port": first.get("dst_port"), "proto": first.get("proto"),
         "service": first.get("service"), "connection_count": len(ordered), "interval_summary": interval_pattern,
-        "periodicity_score": periodicity_score, "bytes_pattern": bytes_pattern, "duration_pattern": duration_pattern,
+        "first_seen": start, "last_seen": end,
+        "time_span": round(fixed_endpoint_duration, 3) if fixed_endpoint_duration is not None else None,
+        "fixed_endpoint_duration": round(fixed_endpoint_duration, 3) if fixed_endpoint_duration is not None else None,
+        "periodicity_score": regularity_score, "regularity_score": regularity_score,
+        "bytes_pattern": bytes_pattern, "duration_pattern": duration_pattern,
         "dns_query_repetition": {"repeated": repeated_dns, "query_count": len(dns_queries), "unique_count": len(set(dns_queries))},
         "tls_sni_repetition": {"repeated": repeated_sni, "sni_count": len(tls_sni), "unique_count": len(set(tls_sni))},
         "beacon_score": round(score, 3),
-        "callback_direction_hint": "same source repeatedly initiates connections to one fixed remote endpoint",
+        "callback_direction_hint": "same source repeatedly initiates connections to one fixed endpoint; endpoint ownership is not proven",
         "evidence_tier": evidence_tier, "c2_indicators": c2_indicators,
+        "benign_periodic_hints": benign_periodic_hints,
+        "competing_behavior_fields": competing_fields,
         "http_hosts": merge_observable_values([card.get("http_hosts", []) for card in ordered], "http_hosts"),
         "http_uris_sample": merge_observable_values([card.get("http_uris_sample", []) for card in ordered], "http_uris_sample"),
         "dns_summary": merge_observable_values([card.get("dns_summary") for card in ordered if card.get("dns_summary")], "dns_summary"),
         "tls_summary": merge_observable_values([card.get("tls_summary") for card in ordered if card.get("tls_summary")], "tls_summary"),
         "member_session_count": len(ordered), "member_session_ids": [card["session_id"] for card in ordered],
     }
+    for field in ("payload_visibility", "observable_payload_available", "encrypted_protocol", "extraction_warnings", "evidence_limits", "evidence_mapping"):
+        values = [card.get(field) for card in ordered if card.get(field) not in (None, "", [], {})]
+        if values:
+            record[field] = merge_observable_values(values, field)
+    return record
 
 
 def make_session_record(card: dict[str, Any]) -> dict[str, Any]:
@@ -357,6 +460,8 @@ def make_session_record(card: dict[str, Any]) -> dict[str, Any]:
         "proto",
         "service",
         "duration",
+        "packet_rate",
+        "byte_rate",
         "orig_pkts",
         "resp_pkts",
         "orig_bytes",
@@ -406,18 +511,19 @@ def main() -> int:
     groups = group_scan_cards(cards, args.scan_window_seconds, args.min_scan_ports, args.min_scan_sessions, args.min_failed_rate)
     scan_groups = [make_scan_group(group, idx) for idx, group in enumerate(groups, start=1)]
     auth_source_groups = group_auth_cards(cards, args.auth_window_seconds, args.min_auth_attempts) if args.emit_auth_groups else []
-    auth_groups = [make_auth_attempt_group(group, idx) for idx, group in enumerate(auth_source_groups, start=1)]
-    auth_groups = [group for group in auth_groups if group["evidence_tier"] == "high_auth_behavioral"]
+    all_auth_groups = [make_auth_attempt_group(group, idx) for idx, group in enumerate(auth_source_groups, start=1)]
+    auth_groups = [group for group in all_auth_groups if group["evidence_tier"] == "high_auth_behavioral"]
     c2_source_groups = group_c2_cards(cards, args.min_c2_connections) if args.emit_c2_groups else []
-    c2_groups = [make_c2_callback_group(group, idx) for idx, group in enumerate(c2_source_groups, start=1)]
-    c2_groups = [group for group in c2_groups if group["beacon_score"] >= args.min_c2_group_score]
+    all_c2_groups = [make_c2_callback_group(group, idx) for idx, group in enumerate(c2_source_groups, start=1)]
+    all_c2_groups = [group for group in all_c2_groups if group["beacon_score"] >= args.min_c2_group_score]
+    c2_groups = [group for group in all_c2_groups if group["evidence_tier"] == "high_callback_behavioral"]
     covered = {sid for group in [*scan_groups, *auth_groups, *c2_groups] for sid in group["member_session_ids"]}
     session_records = [make_session_record(card) for card in cards if card.get("session_id") not in covered]
     records = sorted([*scan_groups, *auth_groups, *c2_groups, *session_records], key=lambda r: (r.get("pcap_id") or "", r.get("start_time") is None, r.get("start_time") or 0, r.get("record_id") or ""))
 
     write_json(args.scan_groups_output, scan_groups)
-    write_json(args.auth_groups_output, auth_groups)
-    write_json(args.c2_groups_output, c2_groups)
+    write_json(args.auth_groups_output, all_auth_groups)
+    write_json(args.c2_groups_output, all_c2_groups)
     write_json(args.records_output, records)
 
     lines = [
@@ -427,7 +533,9 @@ def main() -> int:
         f"- Session cards: {len(cards)}",
         f"- Scan groups: {len(scan_groups)}",
         f"- High-evidence auth attempt groups: {len(auth_groups)}",
-        f"- C2 callback groups above score threshold: {len(c2_groups)}",
+        f"- Weak auth attempt groups retained for audit only: {len(all_auth_groups) - len(auth_groups)}",
+        f"- High-evidence C2 callback groups: {len(c2_groups)}",
+        f"- Medium/weak C2 groups retained for audit only: {len(all_c2_groups) - len(c2_groups)}",
         f"- Scan thresholds: window_seconds={args.scan_window_seconds}, min_ports={args.min_scan_ports}, min_sessions={args.min_scan_sessions}, min_failed_rate={args.min_failed_rate}",
         f"- Covered scan member sessions: {len(covered)}",
         f"- Final classification records: {len(records)}",

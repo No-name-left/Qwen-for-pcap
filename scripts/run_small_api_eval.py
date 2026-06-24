@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run guarded smoke and strict paired online evaluation for observable_boundary_rag_v3."""
+"""Run guarded smoke and strict paired evaluation for the current observable prompt."""
 
 from __future__ import annotations
 
@@ -363,7 +363,7 @@ def combined_report(output_dir: Path, smoke: dict[str, Any] | None, strict: dict
     )
     per_class = main.get("per_class", {})
     lines = [
-        "# Small online API evaluation: observable_boundary_rag_v3", "",
+        f"# Small online API evaluation: {PROMPT_VERSION}", "",
         f"- Generated: {datetime.now(timezone.utc).isoformat()}",
         "- Purpose: guarded local/development evaluation on existing high-confidence public or controlled evidence.",
         "- Official `example-s3-0623` was not used; neither its samples nor answer table entered prompts or metrics.",

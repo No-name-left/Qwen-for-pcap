@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from build_rag_query import indicator_fields_used as detect_indicator_fields
+from build_rag_query import benign_periodic_active, indicator_fields_used as detect_indicator_fields
 from qwen35_rag_utils import (
     DEFAULT_RUNTIME_PROFILES,
     REAL_MICRO_DIR,
@@ -18,12 +18,22 @@ from qwen35_rag_utils import (
 )
 
 
-PROMPT_VERSION = "observable_boundary_rag_v3"
+PROMPT_VERSION = "observable_timing_boundary_rag_v4"
 TECHNIQUE_CODES = ["TA43_01", "TA43_02", "TA01_01", "TA01_02", "TA03_01", "TA11_01", "TA11_02", "TN01_01"]
+TIMING_KEYS = [
+    "duration", "packet_rate", "byte_rate", "time_span",
+    "scan_start", "scan_end", "scan_duration", "port_probe_count", "probe_rate",
+    "inter_arrival_summary", "burstiness_score",
+    "first_attempt", "last_attempt", "attempt_rate", "inter_attempt_intervals", "failure_burst",
+    "first_seen", "last_seen", "interval_summary", "periodicity_score", "regularity_score",
+    "fixed_endpoint_duration", "beacon_score", "benign_periodic_hints",
+    "ordered_event_summary", "relative_time_deltas", "scan_to_exploit_delta",
+    "exploit_to_upload_delta", "upload_to_access_delta", "repeated_backdoor_access_intervals",
+]
 CORE_KEYS = [
     "record_id", "session_id", "pcap", "pcap_id", "record_type", "parser_source",
     "start_time", "end_time", "src_ip", "src_port", "dst_ip", "dst_port", "proto",
-    "service", "duration", "orig_pkts", "resp_pkts", "orig_bytes", "resp_bytes",
+    "service", "orig_pkts", "resp_pkts", "orig_bytes", "resp_bytes",
     "conn_state", "history", "same_src_conn_count", "same_src_unique_dst_ports",
     "same_src_unique_dst_ips", "same_src_failed_conn_rate", "same_dst_unique_src_count",
     "same_src_same_dst_port_count", "session_count", "unique_dst_ports", "failed_conn_rate",
@@ -31,20 +41,21 @@ CORE_KEYS = [
     "auth_group_id", "auth_protocol", "attempt_count", "unique_usernames_seen",
     "username_field_seen", "password_field_seen", "failed_login_count",
     "success_after_failures_hint", "repeated_login_attempts", "same_src_same_dst_auth_attempts",
-    "time_span", "attempt_rate", "status_code_summary", "ftp_response_codes",
+    "status_code_summary", "ftp_response_codes",
     "ssh_auth_failure_hint", "http_login_paths", "weak_evidence_reason", "evidence_tier",
-    "c2_group_id", "connection_count", "interval_summary", "periodicity_score",
+    "c2_group_id", "connection_count",
     "bytes_pattern", "duration_pattern", "dns_query_repetition", "tls_sni_repetition",
-    "beacon_score", "callback_direction_hint", "member_session_count",
+    "callback_direction_hint", "member_session_count",
 ]
 OBSERVABLE_KEYS = [
     "payload_visibility", "observable_payload_available", "encrypted_protocol",
     "extraction_warnings", "evidence_mapping",
+    *TIMING_KEYS,
     "http_methods", "http_hosts", "http_uris_sample", "http_full_uri_sample",
     "http_status_codes", "http_user_agents", "http_referrers", "http_content_types",
     "http_request_body_len", "http_response_body_len", "http_cookie_present",
     "http_auth_header_present", "http_multipart_present", "http_upload_hints",
-    "request_body_snippets_sanitized", "response_body_snippets_sanitized",
+    "http_body_observed", "request_body_snippets_sanitized", "response_body_snippets_sanitized",
     "suspicious_payload_snippets", "suspicious_http_parameters", "suspicious_uri_patterns",
     "exploit_indicators", "vuln_scan_indicators", "auth_indicators",
     "implant_indicators", "backdoor_access_indicators", "c2_indicators",
@@ -114,9 +125,11 @@ def compact_observable(record: dict[str, Any], max_chars: int) -> dict[str, Any]
     for key in OBSERVABLE_KEYS:
         if key not in record or record.get(key) in (None, "", [], {}):
             continue
+        if key == "benign_periodic_hints" and not benign_periodic_active(record):
+            continue
         if key.endswith("_indicators") and key not in active_indicators:
             continue
-        value = sparse_value(record[key]) if key.endswith("_indicators") or key == "transferred_files_summary" else record[key]
+        value = sparse_value(record[key]) if key.endswith("_indicators") or key in {"transferred_files_summary", "benign_periodic_hints"} else record[key]
         if value in (None, "", [], {}):
             continue
         current = len(json.dumps(compact, ensure_ascii=False))
@@ -141,11 +154,13 @@ def instruction_block() -> str:
         "Observable indicators are network-side evidence: they may show an attempt, upload, or command text but do not prove host-side execution, persistence, or success.\n"
         "Use only this record and same-PCAP aggregates. Never use IP/domain reputation or context from another PCAP.\n"
         "Missing payload is not proof of normality. Encrypted traffic is not normal by default; judge direction, repetition, timing, fanout, failures, bytes, and endpoint role.\n"
+        "Time intervals, rates, burst shape, and event order are network-side evidence. In encrypted traffic, rely more on these metadata summaries without inventing hidden content.\n"
+        "Periodicity alone is not C2: combine it with endpoint stability, direction, port, DNS/SNI, transfer-size pattern, application context, and benign update/telemetry/DNS/NTP hints.\n"
         "If evidence remains insufficient after behavioral review, TN01_01 is allowed. Ordinary HTTP/TLS/DNS or a few normal logins are not attacks.\n"
         "TA43_01 needs port/target fanout or short failed discovery; do not upgrade ordinary port scans to TA43_02. TA43_02 needs service fingerprinting, scanner paths/plugins, CVE or vulnerability-specific probes.\n"
         "TA01_01 needs repeated authentication attempts with failure/credential evidence. TA01_02 needs exploit payload, abnormal URI, injection, traversal, webshell upload, or vulnerability-trigger evidence.\n"
         "For auth_attempt_group, require repeated attempts plus explicit failure or credential-field evidence; weak_auth_evidence is not enough for TA01_01.\n"
-        "TA03_01 is deployment/persistence. TA11_01 is attacker-initiated access to an existing backdoor or interactive control entry. TA11_02 is victim-initiated callback/beacon/C2 behavior.\n"
+        "TA03_01 requires network-visible upload/delivery or implant-placement evidence; never claim host persistence succeeded. TA11_01 is attacker-initiated access to an existing backdoor or interactive control entry. TA11_02 is victim-initiated callback/beacon/C2 behavior.\n"
         "For c2_callback_group, use fixed remote endpoint, repeated source-initiated connections, interval/byte patterns, unusual port, and DNS/TLS repetition together.\n"
         "When plaintext suspicious strings are visible, use their URI/body context. When payload_visibility is encrypted_tls or metadata_only, do not invent content and do not default to normal solely because payload is hidden.\n"
         f"Allowed technique_code values: {', '.join(TECHNIQUE_CODES)}. No legacy or invented labels.\n"
@@ -232,6 +247,7 @@ def build_prompt(
         "max_prompt_chars": max_chars,
         "budget_truncated": truncated,
         "observable_fields_included": list(observable),
+        "timing_fields_included": [field for field in TIMING_KEYS if field in observable],
         "indicator_fields_used": retrieval_meta.get("indicator_fields_used") or detect_indicator_fields(record),
         "targeted_rag_triggers": retrieval_meta.get("targeted_rag_triggers", []),
         "targeted_boundary_cards": retrieval_meta.get("targeted_boundary_cards", meta.get("targeted_boundary_doc_ids", [])),
@@ -243,6 +259,7 @@ def build_prompt(
         "budget_truncated": meta["budget_truncated"],
         "rag_chunks_included": meta["rag_chunks_included"],
         "observable_chars": len(observable_json),
+        "timing_fields_included": meta["timing_fields_included"],
     }
     return prompt, meta
 

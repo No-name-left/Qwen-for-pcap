@@ -337,8 +337,8 @@
       "competition_TA11_01_backdoor_access",
       "competition_boundary_TA03_01_vs_TA11_01_vs_TA11_02",
       "competition_technique_codes",
-      "observable_backdoor_access_vs_callback",
-      "observable_exploit_indicator_mapping"
+      "observable_exploit_indicator_mapping",
+      "observable_exploit_upload_access_sequence"
     ],
     "pass": true
   },
@@ -352,8 +352,8 @@
       "boundary_ta43_01_vs_ta43_02",
       "competition_conservative_normal_vs_callback_boundary",
       "normal_high_volume_traffic",
-      "observable_vulnerability_scan_indicators",
-      "port_scan_detection"
+      "observable_scan_probe_timing",
+      "observable_vulnerability_scan_indicators"
     ],
     "pass": true
   },
@@ -381,8 +381,8 @@
     "retrieved_doc_ids": [
       "boundary_ta11_01_vs_ta11_02",
       "boundary_ta11_02_vs_tn01_01",
-      "competition_TA11_01_backdoor_access",
       "observable_backdoor_access_vs_callback",
+      "observable_beacon_timing_boundary",
       "signature_webshell"
     ],
     "pass": true
@@ -414,6 +414,63 @@
       "competition_boundary_TA11_02_vs_TN01_01",
       "competition_normal_business_traffic_boundary",
       "observable_encrypted_visibility_limits"
+    ],
+    "pass": true
+  },
+  {
+    "query_id": "q027_auth_timing",
+    "query": "auth_attempt_group attempt_rate inter_attempt_intervals failure_burst repeated failed login",
+    "expected_doc_ids": [
+      "observable_auth_bruteforce_timing"
+    ],
+    "retrieved_doc_ids": [
+      "bruteforce_detection",
+      "competition_TA01_01_bruteforce",
+      "competition_boundary_TA01_01_vs_TN01_01",
+      "observable_auth_bruteforce_indicators",
+      "observable_auth_bruteforce_timing"
+    ],
+    "pass": true
+  },
+  {
+    "query_id": "q028_scan_timing",
+    "query": "scan_group scan_duration probe_rate burstiness_score URI fanout TA43_01 TA43_02",
+    "expected_doc_ids": [
+      "observable_scan_probe_timing"
+    ],
+    "retrieved_doc_ids": [
+      "boundary_ta43_01_vs_ta43_02",
+      "competition_TA43_01_port_scan",
+      "competition_boundary_TA43_01_vs_TA43_02",
+      "competition_port_scan_vs_vulnerability_scan",
+      "observable_scan_probe_timing"
+    ],
+    "pass": true
+  },
+  {
+    "query_id": "q029_beacon_benign_timing",
+    "query": "interval_summary regularity_score fixed_endpoint_duration benign_periodic_hints update WPAD DNS NTP",
+    "expected_doc_ids": [
+      "normal_periodic_connection_vs_c2",
+      "observable_beacon_timing_boundary"
+    ],
+    "retrieved_doc_ids": [
+      "boundary_ta11_02_vs_tn01_01",
+      "normal_dns_vs_dns_tunnel",
+      "normal_periodic_connection_vs_c2",
+      "observable_beacon_timing_boundary",
+      "protocol_udp_services"
+    ],
+    "pass": true
+  },
+  {
+    "query_id": "q030_event_sequence",
+    "query": "ordered_event_summary scan_to_exploit_delta exploit_to_upload_delta upload_to_access_delta",
+    "expected_doc_ids": [
+      "observable_exploit_upload_access_sequence"
+    ],
+    "retrieved_doc_ids": [
+      "observable_exploit_upload_access_sequence"
     ],
     "pass": true
   }

@@ -36,6 +36,9 @@ TSHARK_FIELDS = [
     "http.content_length",
     "dns.qry.name",
     "tls.handshake.extensions_server_name",
+    # FTP command names and response codes are safe metadata. Never persist ftp.request.arg.
+    "ftp.request.command",
+    "ftp.response.code",
 ]
 
 TSHARK_HTTP_OBSERVABLE_FIELDS = [

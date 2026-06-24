@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from build_qwen35_session_prompts import PROMPT_VERSION, build_prompt
 from build_rag_query import detect_confusion_groups, targeted_rag_metadata
+from build_session_cards import build_cards_from_packets
+from parse_public_pcaps import TSHARK_FIELDS
 from qwen35_rag_utils import load_runtime_profile
 from session_card_indicators import build_file_summary, build_http_fields, build_indicators, make_safe_http_observation
 
@@ -30,11 +32,44 @@ def main() -> int:
     http = build_http_fields([], [observation])
     indicators = build_indicators(http, build_file_summary([]), [], [])
     assert indicators["exploit_indicators"]["xp_cmdshell"]
+    ftp_rows = [
+        {"command": "USER", "arg": "audit-user"},
+        {"command": "PASS", "arg": "[REDACTED]", "reply_code": "530"},
+        {"command": "PASS", "arg": "[REDACTED]", "reply_code": "530"},
+        {"command": "PASS", "arg": "[REDACTED]", "reply_code": "530"},
+        {"command": "PASS", "arg": "[REDACTED]", "reply_code": "530"},
+        {"command": "PASS", "arg": "[REDACTED]", "reply_code": "530"},
+    ]
+    ftp_auth = build_indicators(build_http_fields([], []), build_file_summary([]), [], ftp_rows)["auth_indicators"]
+    assert ftp_auth["session_auth_attempt_count"] == 5 and ftp_auth["failed_login_count"] == 5
+    assert ftp_auth["failed_login_hint"] and ftp_auth["ftp_response_codes"] == ["530"]
+    assert "audit-user" not in str(ftp_auth) and "[REDACTED]" not in str(ftp_auth)
+    assert "ftp.request.command" in TSHARK_FIELDS and "ftp.response.code" in TSHARK_FIELDS
+    assert "ftp.request.arg" not in TSHARK_FIELDS
+    ftp_packets = []
+    for index in range(5):
+        ftp_packets.extend([
+            {
+                "frame.time_epoch": str(index * 2.0), "ip.src": "10.0.0.1", "ip.dst": "10.0.0.2",
+                "tcp.srcport": "41000", "tcp.dstport": "21", "tcp.stream": "9",
+                "_ws.col.Protocol": "FTP", "frame.len": "80", "ftp.request.command": "PASS",
+            },
+            {
+                "frame.time_epoch": str(index * 2.0 + 0.1), "ip.src": "10.0.0.2", "ip.dst": "10.0.0.1",
+                "tcp.srcport": "21", "tcp.dstport": "41000", "tcp.stream": "9",
+                "_ws.col.Protocol": "FTP", "frame.len": "80", "ftp.response.code": "530",
+            },
+        ])
+    ftp_card = build_cards_from_packets(ftp_packets, "ftp_tshark_fixture")[0]
+    assert ftp_card["parser_source"] == "tshark_fallback"
+    assert ftp_card["auth_indicators"]["failed_login_count"] == 5
+    assert ftp_card["auth_indicators"]["password_field_seen"]
+    assert any("zeek_unavailable" in warning for warning in ftp_card["extraction_warnings"])
     record = {
         "record_id": "observable::session::1", "session_id": "observable::session::1",
         "pcap_id": "observable", "record_type": "session", "src_ip": "10.0.0.1",
         "dst_ip": "10.0.0.2", "dst_port": 80, "proto": "tcp", "service": "http",
-        "payload_visibility": "plaintext_http", **http, **indicators,
+        "payload_visibility": "plaintext_http", "duration": 1.25, "packet_rate": 8.0, **http, **indicators,
     }
     groups = detect_confusion_groups(record)
     triggers, docs, fields = targeted_rag_metadata(record, groups)
@@ -51,6 +86,9 @@ def main() -> int:
         "implant_indicators": {"multipart_upload": True},
         "backdoor_access_indicators": {"webshell_path_hint": True},
         "c2_indicators": {"periodic_connections": True, "beacon_score": 0.8},
+        "interval_summary": {"count": 5, "median": 30.0, "mean": 30.0, "std": 0.5, "cv": 0.017},
+        "regularity_score": 0.983,
+        "benign_periodic_hints": {"periodicity_alone": True},
     }
     all_groups = detect_confusion_groups(all_trigger_record)
     all_triggers, all_docs, all_fields = targeted_rag_metadata(all_trigger_record, all_groups)
@@ -60,15 +98,20 @@ def main() -> int:
         "payload_visibility",
     }
     assert "payload_visibility=encrypted_tls" in all_triggers
+    assert "encrypted_timing_metadata=positive" in all_triggers
+    assert "callback_timing=positive" in all_triggers
+    assert "benign_periodic_hints=positive" in all_triggers
     assert {
         "observable_vulnerability_scan_indicators", "observable_exploit_indicator_mapping",
         "observable_auth_bruteforce_indicators", "observable_file_upload_and_implant_hints",
         "observable_backdoor_access_vs_callback", "observable_encrypted_visibility_limits",
+        "observable_beacon_timing_boundary", "normal_periodic_connection_vs_c2",
     }.issubset(set(all_docs))
 
     prompt, meta = build_prompt(record, "technique", None, load_runtime_profile("dry_run_mock"))
-    assert PROMPT_VERSION == "observable_boundary_rag_v3"
+    assert PROMPT_VERSION == "observable_timing_boundary_rag_v4"
     assert "OBSERVABLE_EVIDENCE_FROM_PCAP:" in prompt and "xp_cmdshell" in prompt
+    assert "packet_rate" in prompt and "duration" in meta["timing_fields_included"]
     assert meta["estimated_prompt_tokens"] <= 3400
     print("observable evidence redaction, indicators, RAG triggers, and prompt budget passed")
     return 0

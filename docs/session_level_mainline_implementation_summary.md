@@ -6,7 +6,7 @@
 
 The offline session-level mainline runs without API calls and now fails clearly instead of silently accepting zero session cards. It recursively discovers case directories below `outputs/parsed/`. The model prompt path is technique-only; stage codes are derived deterministically.
 
-Session cards now also carry bounded observable HTTP evidence, Zeek file/auth metadata, closed-set indicator structures, explicit encrypted/missing-payload visibility, and a compact same-PCAP summary. TShark body fields are streamed through a redacting reducer; complete bodies, secret header values, and extracted files are not persisted. Prompt version is `observable_boundary_rag_v3`.
+Session cards now also carry bounded observable HTTP evidence, Zeek file/auth metadata, closed-set indicator structures, explicit encrypted/missing-payload visibility, compact timing summaries, and a same-PCAP summary. TShark body fields are streamed through a redacting reducer; complete bodies, secret header values, and extracted files are not persisted. Prompt version is `observable_timing_boundary_rag_v4`.
 
 ## Added and modified files
 
@@ -62,7 +62,9 @@ Updated generated RAG artifacts:
 - `rag/index/keyword_index.json`
 - `rag/index/keyword_index_report.md`
 
-Added seven short `rag/knowledge/observable_evidence/` cards for HTTP payload visibility, exploit strings, vulnerability scans, auth brute force, uploads/implants, access versus callback, and encrypted visibility limits.
+Observable-evidence cards cover HTTP payload visibility, exploit strings, vulnerability scans, auth brute force and timing, uploads/implants, access versus callback, scan timing, beacon/benign periodic timing, event ordering, and encrypted visibility limits.
+
+The current field-by-field audit is in `docs/reports/pcap_observable_coverage_audit.md`; the Phase-1/Phase-2 class index is `docs/reports/zeek_tshark_session_card_coverage_by_stage.md`.
 
 ## Observable-evidence regression
 
@@ -71,7 +73,7 @@ Added seven short `rag/knowledge/observable_evidence/` cards for HTTP payload vi
 - HTTP sessions: 40; sessions with suspicious snippets: 15.
 - Inert `xp_cmdshell` evidence: positive in 2 sessions and visible in cards, records, queries, and no-RAG/RAG prompts.
 - Maximum prompt size: 8,508 characters / 2,836 estimated tokens, below the 10,200 / 3,400 profile guard.
-- Prompt version: `observable_boundary_rag_v3`.
+- Current prompt version: `observable_timing_boundary_rag_v4`; the listed historical observable regression used v3.
 - No extra dependency was installed.
 
 ## Earlier offline run results

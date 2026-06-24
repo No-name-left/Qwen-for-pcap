@@ -188,7 +188,11 @@ def strict_evidence_supported(row: dict[str, Any]) -> bool:
         return bool(auth.get("repeated_login_attempts") and auth.get("failed_login_hint"))
     if code == "TA11_02":
         c2 = record.get("c2_indicators") or {}
-        return record.get("record_type") == "c2_callback_group" and float(c2.get("beacon_score") or 0) >= 0.65
+        return (
+            record.get("record_type") == "c2_callback_group"
+            and record.get("evidence_tier") == "high_callback_behavioral"
+            and float(c2.get("beacon_score") or 0) >= 0.65
+        )
     return True
 
 

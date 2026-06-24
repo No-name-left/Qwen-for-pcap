@@ -101,6 +101,8 @@ def select_c2_groups(configs: list[tuple[str, Path, Path]], limit: int) -> list[
                 continue
             if float(group.get("beacon_score") or 0) < 0.45:
                 continue
+            if group.get("evidence_tier") != "high_callback_behavioral":
+                continue
             eligible.append((dataset_id, group, label))
     eligible.sort(key=lambda item: (float(item[1].get("beacon_score") or 0), item[2]["label_count"]), reverse=True)
     selected: list[tuple[str, dict[str, Any], dict[str, Any]]] = []

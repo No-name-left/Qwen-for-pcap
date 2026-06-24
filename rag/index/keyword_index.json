@@ -1,5 +1,5 @@
 {
-  "chunk_count": 106,
+  "chunk_count": 110,
   "chunk_meta": {
     "attack_chain_summary__chunk_001": {
       "attack_stage": [
@@ -1238,6 +1238,28 @@
       "source_file": "rag/knowledge/observable_evidence/auth_bruteforce_indicators.md",
       "title": "Authentication brute-force indicators"
     },
+    "observable_auth_bruteforce_timing__chunk_001": {
+      "attack_stage": [
+        "initial_access",
+        "none"
+      ],
+      "attack_type": [
+        "other_attack",
+        "normal"
+      ],
+      "category": "observable_evidence",
+      "doc_id": "observable_auth_bruteforce_timing",
+      "keywords": [
+        "auth_attempt_group",
+        "attempt_rate",
+        "inter_attempt_intervals",
+        "failure_burst",
+        "TA01_01",
+        "TN01_01"
+      ],
+      "source_file": "rag/knowledge/observable_evidence/auth_bruteforce_timing_evidence.md",
+      "title": "Authentication attempt timing evidence"
+    },
     "observable_backdoor_access_vs_callback__chunk_001": {
       "attack_stage": [
         "command_and_control",
@@ -1263,6 +1285,30 @@
       ],
       "source_file": "rag/knowledge/observable_evidence/backdoor_access_vs_callback.md",
       "title": "Backdoor access versus callback evidence"
+    },
+    "observable_beacon_timing_boundary__chunk_001": {
+      "attack_stage": [
+        "command_and_control",
+        "none"
+      ],
+      "attack_type": [
+        "trojan_callback",
+        "c2",
+        "normal"
+      ],
+      "category": "observable_evidence",
+      "doc_id": "observable_beacon_timing_boundary",
+      "keywords": [
+        "interval_summary",
+        "regularity_score",
+        "beacon_score",
+        "fixed_endpoint_duration",
+        "benign_periodic_hints",
+        "TA11_02",
+        "TN01_01"
+      ],
+      "source_file": "rag/knowledge/observable_evidence/beacon_interval_and_benign_periodic_boundary.md",
+      "title": "Beacon intervals and benign periodic traffic boundary"
     },
     "observable_encrypted_visibility_limits__chunk_001": {
       "attack_stage": [
@@ -1316,6 +1362,32 @@
       "source_file": "rag/knowledge/observable_evidence/exploit_indicator_mapping.md",
       "title": "Exploit strings and the TA01_02 versus TA11_01 boundary"
     },
+    "observable_exploit_upload_access_sequence__chunk_001": {
+      "attack_stage": [
+        "initial_access",
+        "persistence",
+        "command_and_control",
+        "none"
+      ],
+      "attack_type": [
+        "exploit",
+        "backdoor",
+        "normal"
+      ],
+      "category": "observable_evidence",
+      "doc_id": "observable_exploit_upload_access_sequence",
+      "keywords": [
+        "ordered_event_summary",
+        "scan_to_exploit_delta",
+        "exploit_to_upload_delta",
+        "upload_to_access_delta",
+        "TA01_02",
+        "TA03_01",
+        "TA11_01"
+      ],
+      "source_file": "rag/knowledge/observable_evidence/exploit_upload_access_event_sequence.md",
+      "title": "Exploit, upload, and later-access event sequence"
+    },
     "observable_file_upload_and_implant_hints__chunk_001": {
       "attack_stage": [
         "persistence",
@@ -1366,6 +1438,30 @@
       ],
       "source_file": "rag/knowledge/observable_evidence/http_payload_indicators.md",
       "title": "Bounded plaintext HTTP evidence"
+    },
+    "observable_scan_probe_timing__chunk_001": {
+      "attack_stage": [
+        "reconnaissance",
+        "initial_access"
+      ],
+      "attack_type": [
+        "port_scan",
+        "other_attack",
+        "exploit"
+      ],
+      "category": "observable_evidence",
+      "doc_id": "observable_scan_probe_timing",
+      "keywords": [
+        "scan_group",
+        "scan_duration",
+        "probe_rate",
+        "burstiness_score",
+        "URI fanout",
+        "TA43_01",
+        "TA43_02"
+      ],
+      "source_file": "rag/knowledge/observable_evidence/scan_burst_and_probe_timing.md",
+      "title": "Scan burst and vulnerability-probe timing"
     },
     "observable_vulnerability_scan_indicators__chunk_001": {
       "attack_stage": [
@@ -2469,6 +2565,7 @@
     },
     "404": {
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 2
     },
     "404s": {
@@ -2570,6 +2667,9 @@
     "according": {
       "other_attack_policy__chunk_001": 1
     },
+    "account": {
+      "observable_auth_bruteforce_timing__chunk_001": 1
+    },
     "account/password": {
       "boundary_ta01_01_vs_tn01_01__chunk_001": 1
     },
@@ -2627,6 +2727,9 @@
     "add": {
       "case_level_vs_event_level_labels__chunk_001": 1
     },
+    "additional": {
+      "observable_beacon_timing_boundary__chunk_001": 1
+    },
     "addresses": {
       "competition_anonymized_ip_domain_policy__chunk_001": 1
     },
@@ -2667,6 +2770,7 @@
       "zeek_http_log_fields__chunk_001": 1
     },
     "agents": {
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "protocol_http__chunk_001": 1,
       "signature_http_c2__chunk_001": 1
@@ -2800,6 +2904,8 @@
       "normal_dns_vs_dns_tunnel__chunk_001": 1,
       "normal_periodic_connection_vs_c2__chunk_001": 1,
       "normal_smb_vs_smb_exploit__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "port_scan_detection__chunk_001": 1,
       "protocol_anomaly_low_confidence__chunk_001": 1,
@@ -2831,6 +2937,7 @@
       "boundary_ta11_02_vs_tn01_01__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "competition_session_and_scan_group_policy__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "protocol_icmp_icmpv6__chunk_001": 1,
       "signature_ms17_010_smb__chunk_001": 1
@@ -2875,6 +2982,7 @@
       "observable_backdoor_access_vs_callback__chunk_001": 2,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 2,
       "observable_file_upload_and_implant_hints__chunk_001": 2,
       "observable_vulnerability_scan_indicators__chunk_001": 2,
       "port_scan_detection__chunk_001": 1,
@@ -2931,11 +3039,15 @@
       "normal_http_vs_web_exploit__chunk_001": 1,
       "normal_smb_vs_smb_exploit__chunk_001": 1,
       "observable_auth_bruteforce_indicators__chunk_001": 4,
+      "observable_auth_bruteforce_timing__chunk_001": 2,
       "observable_backdoor_access_vs_callback__chunk_001": 4,
-      "observable_encrypted_visibility_limits__chunk_001": 2,
+      "observable_beacon_timing_boundary__chunk_001": 4,
+      "observable_encrypted_visibility_limits__chunk_001": 4,
       "observable_exploit_indicator_mapping__chunk_001": 6,
+      "observable_exploit_upload_access_sequence__chunk_001": 4,
       "observable_file_upload_and_implant_hints__chunk_001": 4,
       "observable_http_payload_indicators__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 4,
       "observable_vulnerability_scan_indicators__chunk_001": 4,
       "other_attack_policy__chunk_001": 2,
       "output_schema_policy__chunk_001": 1,
@@ -3031,6 +3143,8 @@
     },
     "application": {
       "competition_TA01_02_exploit__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "protocol_anomaly_low_confidence__chunk_001": 1,
       "signature_directory_traversal__chunk_001": 1,
@@ -3068,8 +3182,12 @@
       "false_positive_low_signal_events__chunk_001": 1,
       "initial_access_stage__chunk_001": 1,
       "observable_auth_bruteforce_indicators__chunk_001": 3,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 2,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 2,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "persistence_stage__chunk_001": 1,
       "protocol_anomaly_low_confidence__chunk_001": 1,
@@ -3117,6 +3235,7 @@
       "event_card_schema_interpretation__chunk_001": 1,
       "event_to_pcap_aggregation__chunk_001": 3,
       "exploit_detection__chunk_001": 2,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "normal_smb_vs_smb_exploit__chunk_001": 2,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
@@ -3285,12 +3404,16 @@
       "boundary_ta01_01_vs_tn01_01__chunk_001": 1,
       "competition_TA01_02_exploit__chunk_001": 1,
       "initial_access_stage__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 3,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "protocol_anomaly_low_confidence__chunk_001": 1,
       "signature_heartbleed__chunk_001": 1,
       "signature_web_xss__chunk_001": 1,
       "web_exploit_detection__chunk_001": 1
+    },
+    "attempt_rate": {
+      "observable_auth_bruteforce_timing__chunk_001": 1
     },
     "attempted": {
       "attack_type_mapping__chunk_001": 1,
@@ -3338,6 +3461,12 @@
       "zeek_conn_log_fields__chunk_001": 1,
       "zeek_http_log_fields__chunk_001": 1
     },
+    "attribution": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
+    },
+    "auth_attempt_group": {
+      "observable_auth_bruteforce_timing__chunk_001": 1
+    },
     "auth_indicators": {
       "observable_auth_bruteforce_indicators__chunk_001": 1
     },
@@ -3353,10 +3482,14 @@
       "competition_boundary_TA01_01_vs_TN01_01__chunk_001": 4,
       "competition_bruteforce_boundary__chunk_001": 3,
       "observable_auth_bruteforce_indicators__chunk_001": 3,
+      "observable_auth_bruteforce_timing__chunk_001": 2,
       "observable_http_payload_indicators__chunk_001": 1,
       "protocol_ssh_ftp_rdp__chunk_001": 2,
       "protocol_tcp_flags__chunk_001": 1,
       "signature_bruteforce__chunk_001": 2
+    },
+    "authentication-failure": {
+      "observable_auth_bruteforce_timing__chunk_001": 1
     },
     "authentication/failure": {
       "observable_auth_bruteforce_indicators__chunk_001": 1
@@ -3445,6 +3578,7 @@
       "event_to_pcap_aggregation__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 2,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 2,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
@@ -3526,8 +3660,10 @@
       "normal_periodic_connection_vs_c2__chunk_001": 1,
       "normal_smb_vs_smb_exploit__chunk_001": 1,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
-      "observable_encrypted_visibility_limits__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 2,
       "observable_exploit_indicator_mapping__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 2,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
@@ -3560,6 +3696,7 @@
       "confidence_policy__chunk_001": 1,
       "normal_periodic_connection_vs_c2__chunk_001": 2,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 2,
       "protocol_smb__chunk_001": 1,
       "signature_doublepulsar__chunk_001": 5,
       "signature_doublepulsar__chunk_002": 4,
@@ -3573,6 +3710,9 @@
     "beacon/control": {
       "signature_doublepulsar__chunk_001": 1,
       "signature_doublepulsar__chunk_002": 1
+    },
+    "beacon_score": {
+      "observable_beacon_timing_boundary__chunk_001": 1
     },
     "beaconing": {
       "command_and_control_stage__chunk_001": 1,
@@ -3599,6 +3739,7 @@
       "exploit_detection__chunk_001": 1,
       "false_positive_low_signal_events__chunk_001": 1,
       "initial_access_stage__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "port_scan_detection__chunk_001": 1,
       "signature_bruteforce__chunk_001": 1,
       "signature_command_injection__chunk_001": 1,
@@ -3687,6 +3828,7 @@
       "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 2,
       "protocol_anomaly_low_confidence__chunk_001": 1,
       "protocol_common_ports__chunk_001": 1,
       "signature_directory_traversal__chunk_001": 1,
@@ -3696,6 +3838,9 @@
       "web_exploit_detection__chunk_001": 1,
       "zeek_http_log_fields__chunk_001": 1,
       "zeek_ssl_tls_log_fields__chunk_001": 1
+    },
+    "benign_periodic_hints": {
+      "observable_beacon_timing_boundary__chunk_001": 1
     },
     "better": {
       "case_level_vs_event_level_labels__chunk_001": 1,
@@ -3834,6 +3979,7 @@
       "competition_bruteforce_boundary__chunk_001": 2,
       "competition_conservative_normal_vs_callback_boundary__chunk_001": 4,
       "competition_normal_business_traffic_boundary__chunk_001": 2,
+      "observable_beacon_timing_boundary__chunk_001": 2,
       "observable_exploit_indicator_mapping__chunk_001": 1
     },
     "boundary:": {
@@ -3928,6 +4074,18 @@
     "bulletin": {
       "signature_ms17_010_smb__chunk_001": 1
     },
+    "burst": {
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1
+    },
+    "burstiness": {
+      "observable_scan_probe_timing__chunk_001": 1
+    },
+    "burstiness_score": {
+      "observable_scan_probe_timing__chunk_001": 1
+    },
     "business": {
       "boundary_ta01_01_vs_tn01_01__chunk_001": 1,
       "boundary_ta01_02_vs_tn01_01__chunk_001": 1,
@@ -3956,6 +4114,8 @@
       "competition_TN01_01_normal_business__chunk_001": 1,
       "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "confidence_policy__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "signature_generic_exploit_alerts__chunk_001": 1,
       "signature_irc_botnet__chunk_001": 1,
@@ -4019,8 +4179,9 @@
       "event_level_vs_pcap_level__chunk_001": 3,
       "event_to_pcap_aggregation__chunk_001": 2,
       "normal_dns_vs_dns_tunnel__chunk_001": 2,
-      "normal_periodic_connection_vs_c2__chunk_001": 5,
+      "normal_periodic_connection_vs_c2__chunk_001": 6,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
@@ -4092,8 +4253,9 @@
       "competition_technique_codes__chunk_001": 1,
       "confidence_policy__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1,
-      "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 2,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 2,
       "persistence_stage__chunk_001": 1,
       "protocol_anomaly_low_confidence__chunk_001": 1,
       "protocol_http__chunk_001": 1,
@@ -4157,7 +4319,9 @@
       "normal_http_vs_web_exploit__chunk_001": 1,
       "normal_periodic_connection_vs_c2__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
-      "observable_encrypted_visibility_limits__chunk_001": 2,
+      "observable_beacon_timing_boundary__chunk_001": 2,
+      "observable_encrypted_visibility_limits__chunk_001": 3,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 2,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "port_scan_detection__chunk_001": 1,
@@ -4287,13 +4451,17 @@
     },
     "chain": {
       "attack_chain_summary__chunk_001": 5,
-      "event_to_pcap_aggregation__chunk_001": 1
+      "event_to_pcap_aggregation__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1
     },
     "chain-of-thought": {
       "output_schema_policy__chunk_001": 1
     },
     "chains": {
       "zeek_files_log_fields__chunk_001": 1
+    },
+    "changes": {
+      "observable_scan_probe_timing__chunk_001": 1
     },
     "channel": {
       "c2_detection__chunk_001": 1,
@@ -4356,8 +4524,11 @@
       "competition_boundary_TA43_01_vs_TA43_02__chunk_001": 1,
       "competition_boundary_TA43_02_vs_TA01_02__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "trojan_callback_detection__chunk_001": 1
     },
     "checksum": {
@@ -4486,7 +4657,11 @@
       "protocol_ssh_ftp_rdp__chunk_001": 1
     },
     "closed-set": {
-      "observable_http_payload_indicators__chunk_001": 1
+      "observable_auth_bruteforce_timing__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
+      "observable_http_payload_indicators__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1
     },
     "closed:": {
       "attack_type_mapping__chunk_001": 1,
@@ -4501,7 +4676,9 @@
     },
     "cloud": {
       "data_exfiltration_detection__chunk_001": 1,
-      "normal_periodic_connection_vs_c2__chunk_001": 1
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 1
     },
     "clue": {
       "protocol_tls_sni__chunk_001": 1
@@ -4553,6 +4730,7 @@
     },
     "combine": {
       "c2_detection__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 1,
       "protocol_tcp_flags__chunk_001": 1,
       "signature_generic_malware_callback__chunk_001": 1
     },
@@ -4578,6 +4756,7 @@
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 2,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "protocol_http__chunk_001": 1,
       "signature_command_injection__chunk_001": 9,
@@ -4630,8 +4809,10 @@
       "normal_dns_vs_dns_tunnel__chunk_001": 2,
       "normal_periodic_connection_vs_c2__chunk_001": 2,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
@@ -4822,6 +5003,7 @@
       "competition_boundary_TA43_02_vs_TA01_02__chunk_001": 3,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
       "initial_access_stage__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
       "web_exploit_detection__chunk_001": 1,
       "zeek_files_log_fields__chunk_001": 1
@@ -4836,6 +5018,9 @@
     "compromised-host": {
       "competition_boundary_TA11_02_vs_TN01_01__chunk_001": 1,
       "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
+    },
+    "concentrated": {
+      "observable_scan_probe_timing__chunk_001": 1
     },
     "conclusive": {
       "zeek_http_log_fields__chunk_001": 1
@@ -4923,6 +5108,7 @@
       "false_positive_low_signal_events__chunk_001": 2,
       "normal_periodic_connection_vs_c2__chunk_001": 2,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
       "port_scan_detection__chunk_001": 3,
       "protocol_anomaly_low_confidence__chunk_001": 2,
@@ -4978,6 +5164,8 @@
     "contact": {
       "command_and_control_stage__chunk_001": 1,
       "competition_TA11_02_trojan_callback__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "protocol_tls_sni__chunk_001": 1,
       "protocol_udp_services__chunk_001": 1,
       "signature_generic_malware_callback__chunk_001": 1,
@@ -5035,7 +5223,11 @@
       "event_to_pcap_aggregation__chunk_001": 1,
       "exploit_detection__chunk_001": 1,
       "false_positive_low_signal_events__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 4,
       "protocol_anomaly_low_confidence__chunk_001": 1,
       "protocol_common_ports__chunk_001": 1,
@@ -5103,8 +5295,14 @@
       "c2_detection__chunk_001": 1,
       "competition_bruteforce_boundary__chunk_001": 1
     },
+    "corroboration": {
+      "normal_periodic_connection_vs_c2__chunk_001": 1
+    },
     "could": {
       "competition_normal_business_traffic_boundary__chunk_001": 1
+    },
+    "count": {
+      "observable_auth_bruteforce_timing__chunk_001": 2
     },
     "counts": {
       "event_card_schema_interpretation__chunk_001": 2,
@@ -5188,6 +5386,7 @@
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "confidence_policy__chunk_001": 1,
       "exploit_detection__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "signature_generic_exploit_alerts__chunk_001": 2
     },
@@ -5258,6 +5457,9 @@
       "competition_TA03_01_backdoor_install__chunk_001": 1,
       "competition_boundary_TA03_01_vs_TA11_01_vs_TA11_02__chunk_001": 1
     },
+    "deltas": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
+    },
     "denial-of-service": {
       "dos_ddos_detection__chunk_001": 1
     },
@@ -5318,7 +5520,6 @@
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "data_exfiltration_detection__chunk_001": 1,
       "event_card_schema_interpretation__chunk_001": 1,
-      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
       "port_scan_detection__chunk_001": 1,
       "reconnaissance_stage__chunk_001": 1,
@@ -5391,7 +5592,7 @@
     "direction": {
       "boundary_ta11_01_vs_ta11_02__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
-      "observable_encrypted_visibility_limits__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 2,
       "signature_generic_malware_callback__chunk_001": 1,
       "zeek_conn_log_fields__chunk_001": 1,
       "zeek_files_log_fields__chunk_001": 1
@@ -5409,6 +5610,9 @@
       "signature_directory_traversal__chunk_001": 1,
       "web_exploit_detection__chunk_001": 1
     },
+    "disambiguate": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
+    },
     "disclose": {
       "signature_heartbleed__chunk_001": 1
     },
@@ -5423,6 +5627,7 @@
       "competition_boundary_TA43_02_vs_TA01_02__chunk_001": 2,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "normal_dns_vs_dns_tunnel__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "port_scan_detection__chunk_001": 1,
       "protocol_icmp_icmpv6__chunk_001": 1,
@@ -5435,6 +5640,7 @@
       "boundary_ta43_01_vs_ta43_02__chunk_001": 1
     },
     "distinguish": {
+      "observable_scan_probe_timing__chunk_001": 1,
       "protocol_tcp_flags__chunk_001": 1,
       "signature_doublepulsar__chunk_002": 1,
       "zeek_conn_log_fields__chunk_001": 1
@@ -5463,8 +5669,10 @@
       "data_exfiltration_detection__chunk_001": 2,
       "event_card_schema_interpretation__chunk_001": 1,
       "normal_dns_vs_dns_tunnel__chunk_001": 8,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
-      "observable_encrypted_visibility_limits__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 2,
       "output_schema_policy__chunk_001": 1,
       "protocol_common_ports__chunk_001": 1,
       "protocol_dns__chunk_001": 8,
@@ -5489,7 +5697,10 @@
       "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
     },
     "dns/sni": {
-      "observable_backdoor_access_vs_callback__chunk_001": 1
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 1
     },
     "dns_queries": {
       "protocol_dns__chunk_001": 1,
@@ -5529,7 +5740,9 @@
       "normal_high_volume_traffic__chunk_001": 1,
       "normal_http_vs_web_exploit__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
       "protocol_anomaly_low_confidence__chunk_001": 1,
@@ -5562,7 +5775,10 @@
       "dos_ddos_detection__chunk_001": 1,
       "false_positive_low_signal_events__chunk_001": 1,
       "none_stage__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 2,
+      "observable_exploit_upload_access_sequence__chunk_001": 2,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
       "tshark_packet_fields__chunk_001": 1
     },
@@ -5576,7 +5792,6 @@
       "competition_bruteforce_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "normal_dns_vs_dns_tunnel__chunk_001": 2,
-      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "normal_smb_vs_smb_exploit__chunk_001": 1,
       "protocol_dns__chunk_001": 3,
       "signature_dns_tunnel__chunk_001": 1,
@@ -5725,8 +5940,11 @@
       "signature_dns_tunnel__chunk_001": 1
     },
     "encrypted": {
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 2,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "protocol_tls_sni__chunk_001": 2,
       "signature_tls_c2__chunk_001": 2,
       "tshark_packet_fields__chunk_001": 1,
@@ -5737,6 +5955,7 @@
     },
     "encryption": {
       "boundary_ta11_02_vs_tn01_01__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "signature_tls_c2__chunk_001": 1
     },
@@ -5746,13 +5965,16 @@
       "competition_TA11_02_trojan_callback__chunk_001": 1,
       "competition_boundary_TA11_02_vs_TN01_01__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 2,
-      "observable_encrypted_visibility_limits__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 2,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "signature_webshell__chunk_001": 1
     },
     "endpoints": {
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
-      "competition_bruteforce_boundary__chunk_001": 1
+      "competition_bruteforce_boundary__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1
     },
     "enough": {
       "boundary_ta11_02_vs_tn01_01__chunk_001": 1,
@@ -5806,6 +6028,9 @@
     "environments": {
       "signature_irc_botnet__chunk_001": 1
     },
+    "equally": {
+      "observable_encrypted_visibility_limits__chunk_001": 1
+    },
     "equate": {
       "normal_high_volume_traffic__chunk_001": 1
     },
@@ -5853,6 +6078,7 @@
     },
     "even": {
       "none_stage__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "zeek_ssl_tls_log_fields__chunk_001": 1
     },
     "event": {
@@ -5869,6 +6095,7 @@
       "false_positive_low_signal_events__chunk_001": 3,
       "initial_access_stage__chunk_001": 1,
       "none_stage__chunk_001": 2,
+      "observable_exploit_upload_access_sequence__chunk_001": 2,
       "output_schema_policy__chunk_001": 1,
       "persistence_stage__chunk_001": 1,
       "protocol_anomaly_low_confidence__chunk_001": 1,
@@ -5971,7 +6198,9 @@
       "normal_periodic_connection_vs_c2__chunk_001": 1,
       "normal_smb_vs_smb_exploit__chunk_001": 2,
       "observable_auth_bruteforce_indicators__chunk_001": 2,
+      "observable_auth_bruteforce_timing__chunk_001": 3,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
@@ -6065,6 +6294,7 @@
       "competition_TA43_02_vulnerability_scan__chunk_001": 2,
       "competition_boundary_TA03_01_vs_TA11_01_vs_TA11_02__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
       "signature_command_injection__chunk_001": 1,
       "signature_ms17_010_smb__chunk_001": 2,
@@ -6082,6 +6312,7 @@
     "existing": {
       "boundary_ta11_01_vs_ta11_02__chunk_001": 1,
       "competition_boundary_TA03_01_vs_TA11_01_vs_TA11_02__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1
     },
@@ -6107,6 +6338,7 @@
       "competition_boundary_TA43_02_vs_TA01_02__chunk_001": 1,
       "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "normal_dns_vs_dns_tunnel__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "protocol_icmp_icmpv6__chunk_001": 1,
       "signature_dns_tunnel__chunk_001": 1,
       "signature_generic_malware_callback__chunk_001": 1,
@@ -6147,8 +6379,10 @@
       "normal_smb_vs_smb_exploit__chunk_001": 6,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 3,
+      "observable_exploit_upload_access_sequence__chunk_001": 4,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
@@ -6195,6 +6429,7 @@
       "observable_exploit_indicator_mapping__chunk_001": 1
     },
     "exploit-shaped": {
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1
     },
     "exploit-specific": {
@@ -6211,6 +6446,9 @@
     "exploit_indicators": {
       "observable_exploit_indicator_mapping__chunk_001": 1
     },
+    "exploit_to_upload_delta": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
+    },
     "exploitation": {
       "boundary_ta01_02_vs_tn01_01__chunk_001": 1,
       "competition_TA01_01_bruteforce__chunk_001": 1,
@@ -6223,6 +6461,7 @@
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 5,
       "normal_http_vs_web_exploit__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "persistence_stage__chunk_001": 1,
       "port_scan_detection__chunk_001": 1,
@@ -6325,7 +6564,11 @@
     },
     "failure": {
       "boundary_ta01_01_vs_tn01_01__chunk_001": 2,
-      "observable_auth_bruteforce_indicators__chunk_001": 1
+      "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1
+    },
+    "failure_burst": {
+      "observable_auth_bruteforce_timing__chunk_001": 1
     },
     "failures": {
       "boundary_ta01_01_vs_tn01_01__chunk_001": 1,
@@ -6333,7 +6576,9 @@
       "competition_TA01_01_bruteforce__chunk_001": 2,
       "competition_bruteforce_boundary__chunk_001": 2,
       "observable_auth_bruteforce_indicators__chunk_001": 4,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "protocol_ssh_ftp_rdp__chunk_001": 1,
       "signature_bruteforce__chunk_001": 1,
       "zeek_conn_log_fields__chunk_001": 1
@@ -6388,14 +6633,19 @@
       "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 4,
       "observable_vulnerability_scan_indicators__chunk_001": 2
+    },
+    "fast": {
+      "observable_auth_bruteforce_timing__chunk_001": 1
     },
     "favor": {
       "observable_backdoor_access_vs_callback__chunk_001": 2,
       "observable_exploit_indicator_mapping__chunk_001": 1
     },
     "favors": {
-      "observable_exploit_indicator_mapping__chunk_001": 1
+      "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 3
     },
     "features": {
       "competition_anonymized_ip_domain_policy__chunk_001": 1,
@@ -6411,6 +6661,7 @@
       "competition_TA43_01_port_scan__chunk_002": 1,
       "event_to_pcap_aggregation__chunk_001": 1,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "protocol_udp_services__chunk_001": 1
     },
     "field": {
@@ -6506,6 +6757,9 @@
     "fixed-remote": {
       "boundary_ta11_01_vs_ta11_02__chunk_001": 1
     },
+    "fixed_endpoint_duration": {
+      "observable_beacon_timing_boundary__chunk_001": 1
+    },
     "flags": {
       "protocol_anomaly_low_confidence__chunk_001": 1,
       "protocol_tcp_flags__chunk_001": 4,
@@ -6577,6 +6831,7 @@
       "none_stage__chunk_001": 2,
       "normal_smb_vs_smb_exploit__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
       "protocol_common_ports__chunk_001": 1,
       "protocol_icmp_icmpv6__chunk_001": 2,
@@ -6639,6 +6894,7 @@
       "normal_dns_vs_dns_tunnel__chunk_001": 1,
       "normal_high_volume_traffic__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
       "output_schema_policy__chunk_001": 3,
       "port_scan_detection__chunk_001": 1,
@@ -6678,7 +6934,8 @@
       "initial_access_stage__chunk_001": 1
     },
     "gaps": {
-      "observable_encrypted_visibility_limits__chunk_001": 1
+      "observable_encrypted_visibility_limits__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1
     },
     "gathering": {
       "reconnaissance_stage__chunk_001": 1
@@ -6752,7 +7009,8 @@
     },
     "group": {
       "competition_TA43_01_port_scan__chunk_002": 1,
-      "event_level_vs_pcap_level__chunk_001": 1
+      "event_level_vs_pcap_level__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1
     },
     "groups": {
       "competition_session_and_scan_group_policy__chunk_001": 1
@@ -6795,15 +7053,17 @@
       "observable_http_payload_indicators__chunk_001": 1
     },
     "health": {
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
-      "observable_backdoor_access_vs_callback__chunk_001": 1
+      "observable_auth_bruteforce_timing__chunk_001": 1,
+      "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1
     },
     "heartbeat": {
       "signature_heartbleed__chunk_001": 3
     },
     "heartbeats": {
-      "boundary_ta11_01_vs_ta11_02__chunk_001": 1,
-      "normal_periodic_connection_vs_c2__chunk_001": 1
+      "boundary_ta11_01_vs_ta11_02__chunk_001": 1
     },
     "heartbleed": {
       "signature_heartbleed__chunk_001": 6
@@ -6838,6 +7098,7 @@
     },
     "hidden": {
       "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
       "weak_evidence_handling__chunk_001": 1
@@ -6861,6 +7122,7 @@
       "event_to_pcap_aggregation__chunk_001": 1,
       "normal_dns_vs_dns_tunnel__chunk_001": 1,
       "normal_high_volume_traffic__chunk_001": 5,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "port_scan_detection__chunk_001": 4,
       "protocol_dns__chunk_001": 1,
@@ -6895,7 +7157,6 @@
       "event_to_pcap_aggregation__chunk_001": 1
     },
     "hint": {
-      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1
     },
     "hints": {
@@ -6921,6 +7182,8 @@
       "boundary_ta11_01_vs_ta11_02__chunk_001": 1,
       "boundary_ta43_01_vs_ta43_02__chunk_001": 1,
       "competition_TA11_02_trojan_callback__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "port_scan_detection__chunk_001": 1,
       "protocol_http__chunk_001": 2,
       "signature_reverse_shell__chunk_001": 1,
@@ -7069,6 +7332,7 @@
       "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_phase_codes__chunk_001": 1,
       "competition_technique_codes__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "persistence_stage__chunk_001": 2,
       "protocol_smb__chunk_001": 3,
@@ -7256,6 +7520,7 @@
     "infer": {
       "attack_chain_summary__chunk_001": 1,
       "exploit_detection__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "signature_doublepulsar__chunk_002": 1,
       "signature_http_c2__chunk_001": 1,
       "zeek_conn_log_fields__chunk_001": 1
@@ -7318,10 +7583,13 @@
       "normal_http_vs_web_exploit__chunk_001": 2,
       "normal_smb_vs_smb_exploit__chunk_001": 2,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
@@ -7435,6 +7703,12 @@
       "initial_access_stage__chunk_001": 1,
       "signature_et_scan__chunk_001": 1
     },
+    "inter-attempt": {
+      "observable_auth_bruteforce_timing__chunk_001": 1
+    },
+    "inter_attempt_intervals": {
+      "observable_auth_bruteforce_timing__chunk_001": 1
+    },
     "interaction": {
       "competition_TA11_01_backdoor_access__chunk_001": 1,
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 1,
@@ -7473,9 +7747,16 @@
     "interpreted": {
       "signature_doublepulsar__chunk_002": 1
     },
+    "interval": {
+      "observable_encrypted_visibility_limits__chunk_001": 1
+    },
+    "interval_summary": {
+      "observable_beacon_timing_boundary__chunk_001": 1
+    },
     "intervals": {
       "normal_periodic_connection_vs_c2__chunk_001": 1,
-      "observable_backdoor_access_vs_callback__chunk_001": 1
+      "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 3
     },
     "into": {
       "competition_TA01_02_exploit__chunk_001": 1,
@@ -7586,9 +7867,11 @@
       "initial_access_stage__chunk_001": 1,
       "none_stage__chunk_001": 3,
       "normal_dns_vs_dns_tunnel__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "normal_smb_vs_smb_exploit__chunk_001": 1,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 3,
+      "observable_beacon_timing_boundary__chunk_001": 2,
       "observable_encrypted_visibility_limits__chunk_001": 2,
       "observable_file_upload_and_implant_hints__chunk_001": 2,
       "observable_vulnerability_scan_indicators__chunk_001": 2,
@@ -7661,6 +7944,7 @@
       "confidence_policy__chunk_001": 1,
       "data_exfiltration_detection__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 2,
       "output_schema_policy__chunk_001": 1,
       "protocol_dns__chunk_001": 1,
       "protocol_tls_sni__chunk_001": 2,
@@ -7677,6 +7961,7 @@
     },
     "its": {
       "competition_session_and_scan_group_policy__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "tshark_packet_fields__chunk_001": 1
     },
     "itself": {
@@ -7703,6 +7988,9 @@
     },
     "joins": {
       "signature_irc_botnet__chunk_001": 1
+    },
+    "jointly": {
+      "observable_beacon_timing_boundary__chunk_001": 1
     },
     "json": {
       "output_schema_policy__chunk_001": 2
@@ -7871,7 +8159,11 @@
       "none_stage__chunk_001": 1
     },
     "later": {
+      "observable_exploit_upload_access_sequence__chunk_001": 2,
       "observable_file_upload_and_implant_hints__chunk_001": 1
+    },
+    "later-access": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
     },
     "leakage": {
       "data_exfiltration_detection__chunk_001": 1
@@ -7908,11 +8200,14 @@
     },
     "limits": {
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 2,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "protocol_anomaly_low_confidence__chunk_001": 1
     },
@@ -7960,6 +8255,8 @@
       "competition_bruteforce_boundary__chunk_001": 3,
       "initial_access_stage__chunk_001": 2,
       "observable_auth_bruteforce_indicators__chunk_001": 2,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "protocol_ssh_ftp_rdp__chunk_001": 1,
       "signature_bruteforce__chunk_001": 2
     },
@@ -7979,6 +8276,9 @@
       "protocol_dns__chunk_001": 1,
       "signature_dns_tunnel__chunk_001": 4,
       "zeek_dns_log_fields__chunk_001": 1
+    },
+    "long-running": {
+      "normal_periodic_connection_vs_c2__chunk_001": 1
     },
     "look": {
       "command_and_control_stage__chunk_001": 1,
@@ -8069,7 +8369,9 @@
       "event_level_vs_pcap_level__chunk_001": 1
     },
     "make": {
-      "boundary_ta11_02_vs_tn01_01__chunk_001": 1
+      "boundary_ta11_02_vs_tn01_01__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 2,
+      "observable_exploit_upload_access_sequence__chunk_001": 1
     },
     "malformed": {
       "protocol_anomaly_low_confidence__chunk_001": 1,
@@ -8087,6 +8389,7 @@
       "event_to_pcap_aggregation__chunk_001": 1,
       "initial_access_stage__chunk_001": 1,
       "normal_http_vs_web_exploit__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
       "protocol_http__chunk_001": 1,
       "signature_dns_tunnel__chunk_001": 1,
@@ -8243,6 +8546,7 @@
       "normal_http_vs_web_exploit__chunk_001": 1,
       "normal_periodic_connection_vs_c2__chunk_001": 1,
       "normal_smb_vs_smb_exploit__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
       "persistence_stage__chunk_001": 2,
@@ -8354,6 +8658,7 @@
       "data_exfiltration_detection__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 2,
       "output_schema_policy__chunk_001": 1,
@@ -8429,7 +8734,11 @@
       "protocol_smb__chunk_001": 1
     },
     "merely": {
-      "competition_boundary_TA11_02_vs_TN01_01__chunk_001": 1
+      "competition_boundary_TA11_02_vs_TN01_01__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1
+    },
+    "merge": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
     },
     "merged": {
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
@@ -8444,6 +8753,7 @@
       "web_exploit_detection__chunk_001": 1
     },
     "metadata": {
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
@@ -8520,6 +8830,7 @@
     "monitoring": {
       "normal_high_volume_traffic__chunk_001": 2,
       "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "port_scan_detection__chunk_001": 1,
       "signature_et_scan__chunk_001": 1
     },
@@ -8558,6 +8869,9 @@
       "competition_TA43_01_port_scan__chunk_002": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 2,
       "competition_session_and_scan_group_policy__chunk_001": 1
+    },
+    "multi-second": {
+      "observable_beacon_timing_boundary__chunk_001": 1
     },
     "multipart": {
       "observable_exploit_indicator_mapping__chunk_001": 1,
@@ -8674,6 +8988,7 @@
     },
     "never": {
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
       "protocol_common_ports__chunk_001": 1
@@ -8749,9 +9064,12 @@
       "normal_periodic_connection_vs_c2__chunk_001": 2,
       "normal_smb_vs_smb_exploit__chunk_001": 2,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
@@ -8823,12 +9141,15 @@
       "normal_dns_vs_dns_tunnel__chunk_001": 4,
       "normal_high_volume_traffic__chunk_001": 3,
       "normal_http_vs_web_exploit__chunk_001": 4,
-      "normal_periodic_connection_vs_c2__chunk_001": 3,
+      "normal_periodic_connection_vs_c2__chunk_001": 4,
       "normal_smb_vs_smb_exploit__chunk_001": 4,
       "observable_auth_bruteforce_indicators__chunk_001": 2,
+      "observable_auth_bruteforce_timing__chunk_001": 2,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 2,
       "observable_http_payload_indicators__chunk_001": 1,
       "other_attack_policy__chunk_001": 2,
@@ -8930,13 +9251,17 @@
       "none_stage__chunk_001": 2,
       "normal_high_volume_traffic__chunk_001": 1,
       "normal_http_vs_web_exploit__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 3,
       "normal_smb_vs_smb_exploit__chunk_001": 1,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 2,
+      "observable_beacon_timing_boundary__chunk_001": 2,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 2,
+      "observable_exploit_upload_access_sequence__chunk_001": 3,
       "observable_file_upload_and_implant_hints__chunk_001": 2,
       "observable_http_payload_indicators__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 3,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "other_attack_policy__chunk_001": 2,
       "output_schema_policy__chunk_001": 3,
@@ -8988,6 +9313,9 @@
       "observable_vulnerability_scan_indicators__chunk_001": 1
     },
     "ntp": {
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 1,
       "protocol_udp_services__chunk_001": 2
     },
     "number": {
@@ -9009,29 +9337,45 @@
     "observable_auth_bruteforce_indicators": {
       "observable_auth_bruteforce_indicators__chunk_001": 1
     },
+    "observable_auth_bruteforce_timing": {
+      "observable_auth_bruteforce_timing__chunk_001": 1
+    },
     "observable_backdoor_access_vs_callback": {
       "observable_backdoor_access_vs_callback__chunk_001": 1
+    },
+    "observable_beacon_timing_boundary": {
+      "observable_beacon_timing_boundary__chunk_001": 1
     },
     "observable_encrypted_visibility_limits": {
       "observable_encrypted_visibility_limits__chunk_001": 1
     },
     "observable_evidence": {
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1
     },
     "observable_exploit_indicator_mapping": {
       "observable_exploit_indicator_mapping__chunk_001": 1
+    },
+    "observable_exploit_upload_access_sequence": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
     },
     "observable_file_upload_and_implant_hints": {
       "observable_file_upload_and_implant_hints__chunk_001": 1
     },
     "observable_http_payload_indicators": {
       "observable_http_payload_indicators__chunk_001": 1
+    },
+    "observable_scan_probe_timing": {
+      "observable_scan_probe_timing__chunk_001": 1
     },
     "observable_vulnerability_scan_indicators": {
       "observable_vulnerability_scan_indicators__chunk_001": 1
@@ -9067,6 +9411,7 @@
       "exploit_detection__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "reconnaissance_stage__chunk_001": 1,
       "weak_evidence_handling__chunk_001": 1
@@ -9110,6 +9455,7 @@
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "exploit_detection__chunk_001": 1,
       "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "protocol_common_ports__chunk_001": 3,
       "protocol_smb__chunk_001": 1,
       "signature_command_injection__chunk_001": 1,
@@ -9137,8 +9483,11 @@
       "event_card_schema_interpretation__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 2,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "port_scan_detection__chunk_001": 1
     },
@@ -9170,6 +9519,7 @@
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1,
       "normal_high_volume_traffic__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
@@ -9261,11 +9611,15 @@
       "normal_periodic_connection_vs_c2__chunk_001": 2,
       "normal_smb_vs_smb_exploit__chunk_001": 2,
       "observable_auth_bruteforce_indicators__chunk_001": 2,
+      "observable_auth_bruteforce_timing__chunk_001": 2,
       "observable_backdoor_access_vs_callback__chunk_001": 2,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 2,
       "observable_exploit_indicator_mapping__chunk_001": 2,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 2,
       "observable_http_payload_indicators__chunk_001": 4,
+      "observable_scan_probe_timing__chunk_001": 2,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "other_attack_policy__chunk_001": 3,
       "output_schema_policy__chunk_001": 2,
@@ -9317,6 +9671,12 @@
     },
     "order": {
       "attack_chain_summary__chunk_001": 1
+    },
+    "ordered": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
+    },
+    "ordered_event_summary": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
     },
     "ordinary": {
       "boundary_ta01_01_vs_tn01_01__chunk_001": 1,
@@ -9390,8 +9750,10 @@
       "normal_dns_vs_dns_tunnel__chunk_001": 1,
       "normal_high_volume_traffic__chunk_001": 1,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "other_attack_policy__chunk_001": 5,
       "output_schema_policy__chunk_001": 1,
@@ -9467,6 +9829,7 @@
       "event_to_pcap_aggregation__chunk_001": 1
     },
     "over": {
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
       "protocol_http__chunk_001": 1,
       "zeek_files_log_fields__chunk_001": 1
@@ -9583,10 +9946,14 @@
       "competition_technique_codes__chunk_001": 1,
       "observable_auth_bruteforce_indicators__chunk_001": 2
     },
+    "passwords": {
+      "observable_auth_bruteforce_timing__chunk_001": 1
+    },
     "path": {
       "attack_chain_summary__chunk_001": 1,
       "normal_http_vs_web_exploit__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "signature_directory_traversal__chunk_001": 3,
       "zeek_files_log_fields__chunk_001": 1
@@ -9601,6 +9968,7 @@
       "data_exfiltration_detection__chunk_001": 1,
       "exploit_detection__chunk_001": 1,
       "normal_http_vs_web_exploit__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 2,
       "protocol_http__chunk_001": 2,
       "signature_directory_traversal__chunk_001": 2,
@@ -9628,6 +9996,7 @@
       "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "data_exfiltration_detection__chunk_001": 1,
       "exploit_detection__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "protocol_tcp_flags__chunk_001": 1,
       "protocol_udp_services__chunk_001": 1,
       "signature_command_injection__chunk_001": 1,
@@ -9653,7 +10022,6 @@
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 4,
       "exploit_detection__chunk_001": 2,
-      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 4,
       "protocol_http__chunk_001": 1,
       "protocol_tls_sni__chunk_001": 1,
@@ -9722,14 +10090,17 @@
       "competition_boundary_TA11_02_vs_TN01_01__chunk_001": 2,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "normal_periodic_connection_vs_c2__chunk_001": 4,
-      "observable_backdoor_access_vs_callback__chunk_001": 2
+      "observable_backdoor_access_vs_callback__chunk_001": 2,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 1
     },
     "periodically": {
       "competition_boundary_TA11_02_vs_TN01_01__chunk_001": 1
     },
     "periodicity": {
       "boundary_ta11_02_vs_tn01_01__chunk_001": 1,
-      "c2_detection__chunk_001": 1
+      "c2_detection__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1
     },
     "periodicity:": {
       "normal_periodic_connection_vs_c2__chunk_001": 1
@@ -9755,6 +10126,7 @@
       "event_card_schema_interpretation__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1,
       "event_to_pcap_aggregation__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 2,
       "observable_file_upload_and_implant_hints__chunk_001": 2,
       "observable_http_payload_indicators__chunk_001": 2,
       "other_attack_policy__chunk_001": 1,
@@ -9828,6 +10200,7 @@
       "boundary_ta43_01_vs_ta43_02__chunk_001": 1
     },
     "plus": {
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 1
     },
     "point": {
@@ -9866,8 +10239,12 @@
       "competition_session_and_scan_group_policy__chunk_001": 1,
       "competition_technique_codes__chunk_001": 1,
       "exploit_detection__chunk_001": 3,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "normal_smb_vs_smb_exploit__chunk_001": 2,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 2,
       "port_scan_detection__chunk_001": 5,
       "protocol_common_ports__chunk_001": 3,
       "protocol_smb__chunk_001": 4,
@@ -9905,6 +10282,7 @@
       "event_card_schema_interpretation__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1,
       "event_to_pcap_aggregation__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
@@ -9931,6 +10309,7 @@
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "event_card_schema_interpretation__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
       "port_scan_detection__chunk_001": 1,
       "protocol_common_ports__chunk_001": 6,
@@ -10057,10 +10436,14 @@
       "competition_boundary_TA43_01_vs_TA43_02__chunk_001": 2,
       "competition_boundary_TA43_02_vs_TA01_02__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 3,
       "reconnaissance_stage__chunk_001": 1,
       "signature_doublepulsar__chunk_001": 1,
       "signature_et_scan__chunk_001": 1
+    },
+    "probe_rate": {
+      "observable_scan_probe_timing__chunk_001": 1
     },
     "probed": {
       "protocol_icmp_icmpv6__chunk_001": 1
@@ -10074,6 +10457,7 @@
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 2,
       "observable_vulnerability_scan_indicators__chunk_001": 3,
       "protocol_udp_services__chunk_001": 1,
       "reconnaissance_stage__chunk_001": 1,
@@ -10201,11 +10585,16 @@
     },
     "prove": {
       "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 2,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "persistence_stage__chunk_001": 1,
       "protocol_tls_sni__chunk_001": 1,
       "zeek_ssl_tls_log_fields__chunk_001": 1
+    },
+    "proves": {
+      "observable_auth_bruteforce_timing__chunk_001": 1
     },
     "provide": {
       "signature_reverse_shell__chunk_001": 1,
@@ -10239,7 +10628,11 @@
       "tshark_packet_fields__chunk_001": 1,
       "zeek_dns_log_fields__chunk_001": 3
     },
+    "query-value": {
+      "observable_scan_probe_timing__chunk_001": 1
+    },
     "quic": {
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "protocol_udp_services__chunk_001": 2
     },
@@ -10282,6 +10675,8 @@
       "event_card_schema_interpretation__chunk_001": 1,
       "normal_dns_vs_dns_tunnel__chunk_001": 1,
       "normal_high_volume_traffic__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 2,
       "output_schema_policy__chunk_001": 1,
       "signature_dns_tunnel__chunk_001": 1,
       "signature_dos_ddos__chunk_001": 1
@@ -10333,6 +10728,7 @@
     "recognizable": {
       "observable_backdoor_access_vs_callback__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1
     },
     "reconnaissance": {
@@ -10355,6 +10751,7 @@
       "event_card_schema_interpretation__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1,
       "event_to_pcap_aggregation__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
@@ -10421,7 +10818,8 @@
     },
     "redirects": {
       "normal_http_vs_web_exploit__chunk_001": 1,
-      "observable_auth_bruteforce_indicators__chunk_001": 1
+      "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1
     },
     "refer": {
       "signature_heartbleed__chunk_001": 1
@@ -10446,10 +10844,19 @@
     "reflection-amplification": {
       "protocol_udp_services__chunk_001": 1
     },
-    "regular": {
+    "refresh": {
       "normal_periodic_connection_vs_c2__chunk_001": 1,
-      "observable_backdoor_access_vs_callback__chunk_001": 2,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1
+    },
+    "regular": {
+      "normal_periodic_connection_vs_c2__chunk_001": 2,
+      "observable_backdoor_access_vs_callback__chunk_001": 2,
+      "observable_beacon_timing_boundary__chunk_001": 2,
+      "observable_encrypted_visibility_limits__chunk_001": 1
+    },
+    "regularity_score": {
+      "observable_beacon_timing_boundary__chunk_001": 1
     },
     "rej": {
       "port_scan_detection__chunk_001": 1,
@@ -10463,6 +10870,9 @@
       "competition_anonymized_ip_domain_policy__chunk_001": 2,
       "competition_phase_codes__chunk_001": 1
     },
+    "relative": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
+    },
     "relevant": {
       "case_level_vs_event_level_labels__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1,
@@ -10474,6 +10884,9 @@
       "signature_strrat__chunk_001": 1,
       "weak_evidence_handling__chunk_001": 1
     },
+    "reliable": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
+    },
     "rely": {
       "competition_bruteforce_boundary__chunk_001": 1,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
@@ -10481,6 +10894,7 @@
     },
     "remain": {
       "normal_high_volume_traffic__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 2,
       "observable_exploit_indicator_mapping__chunk_001": 1,
       "signature_protocol_anomaly__chunk_001": 1
     },
@@ -10495,6 +10909,7 @@
       "command_and_control_stage__chunk_001": 1,
       "competition_TA11_01_backdoor_access__chunk_001": 1,
       "competition_boundary_TA03_01_vs_TA11_01_vs_TA11_02__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
       "protocol_ssh_ftp_rdp__chunk_001": 1,
       "protocol_tls_sni__chunk_001": 1,
@@ -10527,9 +10942,13 @@
       "initial_access_stage__chunk_001": 1,
       "normal_dns_vs_dns_tunnel__chunk_001": 1,
       "normal_http_vs_web_exploit__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "observable_auth_bruteforce_indicators__chunk_001": 3,
+      "observable_auth_bruteforce_timing__chunk_001": 2,
       "observable_backdoor_access_vs_callback__chunk_001": 2,
+      "observable_beacon_timing_boundary__chunk_001": 2,
       "observable_encrypted_visibility_limits__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "protocol_anomaly_low_confidence__chunk_001": 1,
       "protocol_http__chunk_001": 1,
@@ -10598,7 +11017,10 @@
     "request": {
       "competition_TA11_02_trojan_callback__chunk_001": 1,
       "exploit_detection__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 2,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 2,
       "observable_http_payload_indicators__chunk_001": 1,
       "signature_command_injection__chunk_001": 1,
@@ -10667,6 +11089,7 @@
     },
     "resets": {
       "competition_bruteforce_boundary__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "protocol_tcp_flags__chunk_001": 2
     },
     "resolves": {
@@ -10706,6 +11129,7 @@
       "competition_boundary_TA01_01_vs_TN01_01__chunk_001": 1,
       "competition_bruteforce_boundary__chunk_001": 1,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1
     },
     "retrieval": {
@@ -10721,6 +11145,7 @@
       "zeek_http_log_fields__chunk_001": 1
     },
     "reveals": {
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "protocol_tls_sni__chunk_001": 1
     },
     "reverse": {
@@ -10735,6 +11160,9 @@
     },
     "role": {
       "competition_boundary_TA11_02_vs_TN01_01__chunk_001": 1
+    },
+    "roles": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
     },
     "rough": {
       "case_level_vs_event_level_labels__chunk_001": 3
@@ -10786,6 +11214,15 @@
     "same-endpoint": {
       "observable_auth_bruteforce_indicators__chunk_001": 1
     },
+    "same-pcap": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
+    },
+    "same-source": {
+      "observable_auth_bruteforce_timing__chunk_001": 1
+    },
+    "same-target": {
+      "observable_auth_bruteforce_timing__chunk_001": 1
+    },
     "sample": {
       "tshark_packet_fields__chunk_001": 1,
       "zeek_dns_log_fields__chunk_001": 1
@@ -10817,6 +11254,7 @@
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 3,
       "event_level_vs_pcap_level__chunk_001": 1,
       "normal_high_volume_traffic__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "port_scan_detection__chunk_001": 4,
       "protocol_icmp_icmpv6__chunk_001": 1,
@@ -10839,11 +11277,18 @@
     "scan-related": {
       "reconnaissance_stage__chunk_001": 1
     },
+    "scan_duration": {
+      "observable_scan_probe_timing__chunk_001": 1
+    },
     "scan_group": {
       "competition_TA43_01_port_scan__chunk_001": 1,
       "competition_TA43_01_port_scan__chunk_002": 2,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
-      "competition_session_and_scan_group_policy__chunk_001": 3
+      "competition_session_and_scan_group_policy__chunk_001": 3,
+      "observable_scan_probe_timing__chunk_001": 1
+    },
+    "scan_to_exploit_delta": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
     },
     "scanner": {
       "boundary_ta43_01_vs_ta43_02__chunk_001": 1,
@@ -10855,6 +11300,7 @@
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
       "normal_http_vs_web_exploit__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 2,
       "observable_vulnerability_scan_indicators__chunk_001": 4
     },
     "scanner-like": {
@@ -10881,6 +11327,7 @@
       "competition_session_and_scan_group_policy__chunk_001": 1,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "port_scan_detection__chunk_001": 1,
       "protocol_common_ports__chunk_001": 1,
       "protocol_tcp_flags__chunk_001": 2,
@@ -10976,6 +11423,9 @@
     "separators": {
       "observable_exploit_indicator_mapping__chunk_001": 1
     },
+    "sequence": {
+      "observable_exploit_upload_access_sequence__chunk_001": 3
+    },
     "sequencing": {
       "port_scan_detection__chunk_001": 1
     },
@@ -10990,6 +11440,7 @@
       "web_exploit_detection__chunk_001": 1
     },
     "server-directed": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 1
     },
     "server-side": {
@@ -11035,6 +11486,7 @@
       "competition_TA43_02_vulnerability_scan__chunk_001": 1,
       "competition_boundary_TA43_01_vs_TA43_02__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1
     },
     "services": {
@@ -11086,6 +11538,7 @@
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
       "competition_session_and_scan_group_policy__chunk_001": 2,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "protocol_tcp_flags__chunk_001": 1,
       "signature_reverse_shell__chunk_001": 1,
       "zeek_conn_log_fields__chunk_001": 1
@@ -11167,6 +11620,8 @@
       "competition_boundary_TA43_01_vs_TA43_02__chunk_001": 1,
       "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "protocol_tcp_flags__chunk_001": 1
     },
@@ -11192,6 +11647,7 @@
       "event_to_pcap_aggregation__chunk_001": 1,
       "false_positive_low_signal_events__chunk_001": 2,
       "normal_high_volume_traffic__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
       "output_schema_policy__chunk_001": 2,
       "port_scan_detection__chunk_001": 1,
@@ -11400,7 +11856,9 @@
     },
     "similar": {
       "competition_bruteforce_boundary__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "zeek_conn_log_fields__chunk_001": 1
     },
     "simply": {
@@ -11421,7 +11879,8 @@
       "weak_evidence_handling__chunk_001": 1
     },
     "sizes": {
-      "observable_encrypted_visibility_limits__chunk_001": 1
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 2
     },
     "slice": {
       "event_level_vs_pcap_level__chunk_001": 1
@@ -11510,6 +11969,8 @@
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 1,
       "competition_boundary_TA11_02_vs_TN01_01__chunk_001": 1,
       "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 1,
       "trojan_callback_detection__chunk_001": 1
     },
     "solely": {
@@ -11552,6 +12013,10 @@
     "source-code": {
       "observable_exploit_indicator_mapping__chunk_001": 1
     },
+    "source-initiated": {
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1
+    },
     "source/destination": {
       "competition_conservative_normal_vs_callback_boundary__chunk_001": 1
     },
@@ -11568,6 +12033,9 @@
     },
     "sources:": {
       "signature_strrat__chunk_001": 1
+    },
+    "span": {
+      "observable_auth_bruteforce_timing__chunk_001": 1
     },
     "sparingly": {
       "other_attack_policy__chunk_001": 1
@@ -11614,6 +12082,7 @@
       "competition_TA01_01_bruteforce__chunk_001": 1,
       "competition_bruteforce_boundary__chunk_001": 2,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "protocol_common_ports__chunk_001": 1,
       "protocol_ssh_ftp_rdp__chunk_001": 4,
@@ -11628,6 +12097,9 @@
     "ssh/ftp/rdp/smb/http-login": {
       "competition_TA01_01_bruteforce__chunk_001": 1
     },
+    "ssh/https": {
+      "observable_auth_bruteforce_timing__chunk_001": 1
+    },
     "ssh/rdp": {
       "competition_TA11_01_backdoor_access__chunk_001": 1
     },
@@ -11638,11 +12110,14 @@
       "zeek_ssl_tls_log_fields__chunk_001": 1
     },
     "sso": {
-      "observable_auth_bruteforce_indicators__chunk_001": 1
+      "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1
     },
     "stable": {
       "boundary_ta11_02_vs_tn01_01__chunk_001": 1,
       "competition_session_and_scan_group_policy__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "signature_strrat__chunk_001": 1
     },
     "stacked": {
@@ -11742,6 +12217,9 @@
       "event_to_pcap_aggregation__chunk_001": 2,
       "stage_mapping_overview__chunk_001": 1
     },
+    "stages:": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
+    },
     "staging": {
       "zeek_files_log_fields__chunk_001": 1
     },
@@ -11806,6 +12284,9 @@
     },
     "strict": {
       "case_level_vs_event_level_labels__chunk_001": 1
+    },
+    "string": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
     },
     "strings": {
       "competition_TA01_02_exploit__chunk_001": 1,
@@ -11876,6 +12357,10 @@
     "structure": {
       "zeek_dns_log_fields__chunk_001": 1
     },
+    "sub-second": {
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1
+    },
     "subdomains": {
       "normal_dns_vs_dns_tunnel__chunk_001": 1,
       "protocol_dns__chunk_001": 1,
@@ -11901,8 +12386,12 @@
     },
     "success": {
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
       "zeek_conn_log_fields__chunk_001": 1
+    },
+    "success-after-failures": {
+      "observable_auth_bruteforce_timing__chunk_001": 1
     },
     "successful": {
       "backdoor_detection__chunk_001": 1,
@@ -11919,6 +12408,7 @@
       "event_card_schema_interpretation__chunk_001": 1,
       "exploit_detection__chunk_001": 1,
       "false_positive_low_signal_events__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "normal_smb_vs_smb_exploit__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
@@ -11943,6 +12433,7 @@
       "attack_chain_summary__chunk_001": 1,
       "event_card_schema_interpretation__chunk_001": 1,
       "event_level_vs_pcap_level__chunk_001": 2,
+      "observable_encrypted_visibility_limits__chunk_001": 1,
       "protocol_anomaly_low_confidence__chunk_001": 1,
       "protocol_tcp_flags__chunk_001": 1,
       "reconnaissance_stage__chunk_001": 1,
@@ -11961,6 +12452,7 @@
     "summary": {
       "attack_chain_summary__chunk_001": 3,
       "event_to_pcap_aggregation__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "zeek_conn_log_fields__chunk_001": 1
     },
     "support": {
@@ -11973,10 +12465,12 @@
       "none_stage__chunk_001": 1,
       "observable_auth_bruteforce_indicators__chunk_001": 2,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 2,
       "observable_vulnerability_scan_indicators__chunk_001": 2,
       "protocol_dns__chunk_001": 2,
       "protocol_icmp_icmpv6__chunk_001": 1,
@@ -12005,6 +12499,7 @@
       "weak_evidence_handling__chunk_001": 1
     },
     "supporting": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "tshark_packet_fields__chunk_001": 1
     },
     "supports": {
@@ -12012,6 +12507,7 @@
       "c2_detection__chunk_001": 1,
       "command_and_control_stage__chunk_001": 1,
       "normal_high_volume_traffic__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 2,
@@ -12048,7 +12544,6 @@
       "data_exfiltration_detection__chunk_001": 1,
       "exploit_detection__chunk_001": 2,
       "false_positive_low_signal_events__chunk_001": 1,
-      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "protocol_anomaly_low_confidence__chunk_001": 1,
       "protocol_dns__chunk_001": 1,
       "protocol_tcp_flags__chunk_001": 1,
@@ -12101,7 +12596,9 @@
       "competition_TA43_01_port_scan__chunk_001": 1
     },
     "sync": {
-      "normal_periodic_connection_vs_c2__chunk_001": 1
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 1
     },
     "synchronization": {
       "data_exfiltration_detection__chunk_001": 1
@@ -12138,7 +12635,8 @@
       "competition_boundary_TA01_01_vs_TN01_01__chunk_001": 4,
       "competition_bruteforce_boundary__chunk_001": 2,
       "competition_technique_codes__chunk_001": 2,
-      "observable_auth_bruteforce_indicators__chunk_001": 2
+      "observable_auth_bruteforce_indicators__chunk_001": 2,
+      "observable_auth_bruteforce_timing__chunk_001": 2
     },
     "ta01_02": {
       "boundary_ta01_02_vs_tn01_01__chunk_001": 3,
@@ -12153,6 +12651,7 @@
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 3,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 3,
+      "observable_exploit_upload_access_sequence__chunk_001": 2,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
@@ -12172,6 +12671,7 @@
       "competition_technique_codes__chunk_001": 2,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 2,
       "observable_file_upload_and_implant_hints__chunk_001": 2,
       "observable_http_payload_indicators__chunk_001": 1
     },
@@ -12192,6 +12692,7 @@
       "competition_technique_codes__chunk_001": 2,
       "observable_backdoor_access_vs_callback__chunk_001": 2,
       "observable_exploit_indicator_mapping__chunk_001": 3,
+      "observable_exploit_upload_access_sequence__chunk_001": 2,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1
     },
@@ -12208,6 +12709,7 @@
       "competition_conservative_normal_vs_callback_boundary__chunk_001": 2,
       "competition_technique_codes__chunk_001": 2,
       "observable_backdoor_access_vs_callback__chunk_001": 3,
+      "observable_beacon_timing_boundary__chunk_001": 2,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "signature_strrat__chunk_001": 1
     },
@@ -12227,6 +12729,7 @@
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 2,
       "competition_session_and_scan_group_policy__chunk_001": 1,
       "competition_technique_codes__chunk_001": 2,
+      "observable_scan_probe_timing__chunk_001": 2,
       "observable_vulnerability_scan_indicators__chunk_001": 2
     },
     "ta43_02": {
@@ -12240,6 +12743,7 @@
       "competition_technique_codes__chunk_001": 2,
       "competition_vulnerability_scan_vs_exploitation__chunk_001": 2,
       "observable_exploit_indicator_mapping__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 2,
       "observable_vulnerability_scan_indicators__chunk_001": 2
     },
     "tactic": {
@@ -12314,7 +12818,9 @@
       "competition_boundary_TA11_02_vs_TN01_01__chunk_001": 2,
       "competition_normal_business_traffic_boundary__chunk_001": 1,
       "normal_periodic_connection_vs_c2__chunk_001": 3,
-      "observable_backdoor_access_vs_callback__chunk_001": 1
+      "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 1
     },
     "terms": {
       "signature_ms17_010_smb__chunk_001": 1
@@ -12472,6 +12978,7 @@
     "these": {
       "case_level_vs_event_level_labels__chunk_001": 1,
       "competition_technique_codes__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
       "signature_ms17_010_smb__chunk_001": 1,
       "signature_protocol_anomaly__chunk_001": 2,
@@ -12520,7 +13027,8 @@
     },
     "time": {
       "competition_port_scan_vs_vulnerability_scan__chunk_001": 1,
-      "normal_periodic_connection_vs_c2__chunk_001": 1
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1
     },
     "timeout": {
       "dos_ddos_detection__chunk_001": 1
@@ -12528,7 +13036,9 @@
     "timing": {
       "c2_detection__chunk_001": 2,
       "competition_conservative_normal_vs_callback_boundary__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 2,
       "observable_encrypted_visibility_limits__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "protocol_tls_sni__chunk_001": 1
     },
     "timing/byte": {
@@ -12538,6 +13048,7 @@
       "boundary_ta11_02_vs_tn01_01__chunk_001": 1,
       "c2_detection__chunk_001": 1,
       "event_card_schema_interpretation__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
       "protocol_tls_sni__chunk_001": 4,
@@ -12584,6 +13095,8 @@
       "competition_normal_business_traffic_boundary__chunk_001": 2,
       "competition_technique_codes__chunk_001": 3,
       "observable_auth_bruteforce_indicators__chunk_001": 2,
+      "observable_auth_bruteforce_timing__chunk_001": 2,
+      "observable_beacon_timing_boundary__chunk_001": 2,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "signature_protocol_anomaly__chunk_001": 2,
       "weak_evidence_handling__chunk_001": 1
@@ -12659,6 +13172,7 @@
     },
     "together": {
       "competition_boundary_TA11_02_vs_TN01_01__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "signature_ms17_010_smb__chunk_001": 2
     },
     "too": {
@@ -12712,7 +13226,9 @@
       "event_level_vs_pcap_level__chunk_001": 3,
       "exploit_detection__chunk_001": 1,
       "normal_high_volume_traffic__chunk_001": 3,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "protocol_http__chunk_001": 1,
       "protocol_smb__chunk_001": 1,
       "protocol_tcp_flags__chunk_001": 2,
@@ -12736,7 +13252,8 @@
     "transfer": {
       "competition_TA03_01_backdoor_install__chunk_001": 1,
       "data_exfiltration_detection__chunk_001": 2,
-      "observable_encrypted_visibility_limits__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 2,
       "observable_file_upload_and_implant_hints__chunk_001": 2,
       "zeek_files_log_fields__chunk_001": 2
     },
@@ -12750,6 +13267,7 @@
       "competition_TA03_01_backdoor_install__chunk_001": 1,
       "dos_ddos_detection__chunk_001": 1,
       "normal_high_volume_traffic__chunk_001": 1,
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1
     },
     "transmitted": {
@@ -12822,6 +13340,7 @@
       "event_to_pcap_aggregation__chunk_001": 1,
       "normal_periodic_connection_vs_c2__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
@@ -12941,6 +13460,7 @@
     },
     "uncertain": {
       "attack_type_mapping__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
       "other_attack_policy__chunk_001": 1
     },
     "uncertainty": {
@@ -12992,6 +13512,9 @@
       "signature_generic_exploit_alerts__chunk_001": 1,
       "weak_evidence_handling__chunk_001": 1
     },
+    "unrelated": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
+    },
     "unsupported": {
       "stage_mapping_overview__chunk_001": 1
     },
@@ -13004,6 +13527,7 @@
       "normal_dns_vs_dns_tunnel__chunk_001": 1,
       "normal_http_vs_web_exploit__chunk_001": 1,
       "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "protocol_tcp_flags__chunk_001": 1,
       "signature_protocol_anomaly__chunk_001": 1,
       "signature_reverse_shell__chunk_001": 1,
@@ -13026,7 +13550,9 @@
       "competition_TA11_02_trojan_callback__chunk_001": 1,
       "competition_TN01_01_normal_business__chunk_001": 1,
       "normal_periodic_connection_vs_c2__chunk_001": 1,
-      "observable_backdoor_access_vs_callback__chunk_001": 1
+      "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 1
     },
     "upgrade": {
       "competition_boundary_TA43_01_vs_TA43_02__chunk_001": 1
@@ -13037,10 +13563,14 @@
       "competition_boundary_TA03_01_vs_TA11_01_vs_TA11_02__chunk_001": 1,
       "data_exfiltration_detection__chunk_001": 2,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 3,
       "observable_file_upload_and_implant_hints__chunk_001": 5,
       "observable_http_payload_indicators__chunk_001": 1,
       "protocol_http__chunk_001": 1,
       "signature_webshell__chunk_001": 2
+    },
+    "upload_to_access_delta": {
+      "observable_exploit_upload_access_sequence__chunk_001": 1
     },
     "uploaded": {
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 1,
@@ -13057,6 +13587,7 @@
       "competition_boundary_TA11_02_vs_TN01_01__chunk_001": 1,
       "event_card_schema_interpretation__chunk_001": 1,
       "normal_http_vs_web_exploit__chunk_001": 2,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "protocol_http__chunk_001": 2,
       "signature_directory_traversal__chunk_001": 1,
@@ -13069,6 +13600,9 @@
       "web_exploit_detection__chunk_001": 1,
       "zeek_files_log_fields__chunk_001": 1,
       "zeek_http_log_fields__chunk_001": 3
+    },
+    "uri-path": {
+      "observable_scan_probe_timing__chunk_001": 2
     },
     "uris": {
       "competition_backdoor_implant_access_callback_boundary__chunk_001": 1,
@@ -13112,8 +13646,12 @@
       "initial_access_stage__chunk_001": 2,
       "none_stage__chunk_001": 2,
       "normal_dns_vs_dns_tunnel__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 2,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 3,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
       "persistence_stage__chunk_001": 1,
@@ -13148,6 +13686,7 @@
     "useful": {
       "case_level_vs_event_level_labels__chunk_001": 1,
       "competition_boundary_TA01_01_vs_TN01_01__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "port_scan_detection__chunk_001": 1,
       "protocol_tls_sni__chunk_001": 1,
       "signature_ms17_010_smb__chunk_001": 1,
@@ -13158,6 +13697,7 @@
       "competition_anonymized_ip_domain_policy__chunk_001": 1
     },
     "user": {
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "protocol_http__chunk_001": 1,
       "signature_http_c2__chunk_001": 1,
@@ -13343,6 +13883,7 @@
       "normal_high_volume_traffic__chunk_001": 1,
       "normal_smb_vs_smb_exploit__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "protocol_smb__chunk_001": 1,
       "reconnaissance_stage__chunk_001": 1,
@@ -13358,6 +13899,9 @@
     },
     "vulnerability-enumeration": {
       "competition_boundary_TA43_01_vs_TA43_02__chunk_001": 1
+    },
+    "vulnerability-probe": {
+      "observable_scan_probe_timing__chunk_001": 1
     },
     "vulnerability-scanner": {
       "competition_TA43_02_vulnerability_scan__chunk_001": 1
@@ -13396,6 +13940,7 @@
       "confidence_policy__chunk_001": 1,
       "normal_dns_vs_dns_tunnel__chunk_001": 1,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
       "protocol_dns__chunk_001": 1,
@@ -13514,6 +14059,8 @@
       "none_stage__chunk_001": 1,
       "normal_high_volume_traffic__chunk_001": 1,
       "observable_encrypted_visibility_limits__chunk_001": 1,
+      "observable_exploit_upload_access_sequence__chunk_001": 1,
+      "observable_scan_probe_timing__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "output_schema_policy__chunk_001": 1,
       "persistence_stage__chunk_001": 1,
@@ -13601,7 +14148,10 @@
       "false_positive_low_signal_events__chunk_001": 1,
       "normal_high_volume_traffic__chunk_001": 1,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
       "observable_backdoor_access_vs_callback__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 1,
       "observable_vulnerability_scan_indicators__chunk_001": 1,
       "other_attack_policy__chunk_001": 1,
       "protocol_ssh_ftp_rdp__chunk_001": 1,
@@ -13661,6 +14211,8 @@
       "normal_high_volume_traffic__chunk_001": 1,
       "normal_http_vs_web_exploit__chunk_001": 1,
       "observable_auth_bruteforce_indicators__chunk_001": 1,
+      "observable_auth_bruteforce_timing__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
       "observable_exploit_indicator_mapping__chunk_001": 1,
       "observable_file_upload_and_implant_hints__chunk_001": 1,
       "observable_http_payload_indicators__chunk_001": 1,
@@ -13682,6 +14234,11 @@
       "signature_ms17_010_smb__chunk_001": 1,
       "signature_strrat__chunk_001": 1,
       "signature_tls_c2__chunk_001": 1
+    },
+    "wpad": {
+      "normal_periodic_connection_vs_c2__chunk_001": 1,
+      "observable_beacon_timing_boundary__chunk_001": 1,
+      "observable_encrypted_visibility_limits__chunk_001": 1
     },
     "xp_cmdshell": {
       "observable_exploit_indicator_mapping__chunk_001": 2
@@ -13733,6 +14290,6 @@
       "zeek_weird_notice_logs__chunk_001": 1
     }
   },
-  "token_count": 1645,
+  "token_count": 1709,
   "version": 1
 }

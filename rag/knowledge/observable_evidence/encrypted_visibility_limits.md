@@ -15,4 +15,4 @@ safe_for_llm: true
 
 # Limits and boundaries
 
-Hidden content is neither attack evidence nor proof of normality. Repeated regular external callbacks can support `TA11_02`; one ordinary TLS/SSH/QUIC session usually supports `TN01_01`. Never invent commands, credentials, exploit strings, or host-side outcomes when payload is unavailable.
+Hidden content is neither attack evidence nor proof of normality. Repeated regular external callbacks can support `TA11_02`, but software updates, WPAD, DNS refresh, NTP, cloud sync, and telemetry can be equally periodic. Combine interval summaries with endpoint, direction, port, transfer sizes, DNS/SNI, and application context. One ordinary TLS/SSH/QUIC session usually supports `TN01_01`. Never invent commands, credentials, exploit strings, or host-side outcomes when payload is unavailable.

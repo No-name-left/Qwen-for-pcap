@@ -12,11 +12,11 @@ safe_for_llm: true
 
 ## Evidence
 
-Periodic connections can be benign software updates, telemetry, time sync, monitoring, or cloud service heartbeats.
+Periodic connections can be benign software updates, WPAD, DNS refresh, NTP, telemetry, monitoring, cloud sync, or service health checks. A regular sub-second request burst is not a long-running beacon.
 
 ## Judgment
 
-C2 requires more than periodicity: suspicious domain, malware alert, unusual destination, beacon payload hint, or known family signature.
+C2 requires more than periodicity: stable source-initiated remote contact over time plus corroboration such as unusual port, repeated DNS/SNI, similar transfers, callback context, malware alert, or known family signature. Encryption does not make traffic normal, but it also does not make it C2.
 
 ## Stage mapping
 

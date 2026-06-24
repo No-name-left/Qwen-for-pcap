@@ -30,6 +30,14 @@ INDICATOR_DOCS = {
     "c2_indicators": "observable_backdoor_access_vs_callback",
 }
 
+TIMING_DOCS = {
+    "auth": "observable_auth_bruteforce_timing",
+    "scan": "observable_scan_probe_timing",
+    "callback": "observable_beacon_timing_boundary",
+    "sequence": "observable_exploit_upload_access_sequence",
+    "benign_periodic": "normal_periodic_connection_vs_c2",
+}
+
 
 def add_term(terms: list[str], value: Any) -> None:
     if value is None:
@@ -95,6 +103,14 @@ def indicator_fields_used(record: dict[str, Any]) -> list[str]:
     return fields
 
 
+def benign_periodic_active(record: dict[str, Any]) -> bool:
+    hints = record.get("benign_periodic_hints") or {}
+    direct = any(bool(hints.get(key)) for key in (
+        "update_or_telemetry_text", "dns_refresh_like", "ntp_like", "periodicity_alone",
+    ))
+    return direct or bool(hints.get("short_burst_not_beacon") and field_indicator_active(record, "c2_indicators"))
+
+
 def targeted_rag_metadata(record: dict[str, Any], groups: list[str]) -> tuple[list[str], list[str], list[str]]:
     used = indicator_fields_used(record)
     triggers: list[str] = []
@@ -106,6 +122,36 @@ def targeted_rag_metadata(record: dict[str, Any], groups: list[str]) -> tuple[li
         else:
             triggers.append(f"{field}=positive")
             docs.append(INDICATOR_DOCS[field])
+    if record.get("record_type") == "auth_attempt_group" and record.get("attempt_rate") is not None:
+        triggers.append("auth_timing=positive")
+        docs.append(TIMING_DOCS["auth"])
+    if record.get("record_type") == "scan_group" and record.get("probe_rate") is not None:
+        triggers.append("scan_timing=positive")
+        docs.append(TIMING_DOCS["scan"])
+    callback_timing = record.get("interval_summary") and (
+        record.get("record_type") == "c2_callback_group"
+        or as_number(record.get("beacon_score")) >= 0.5
+        or as_number(record.get("regularity_score")) >= 0.6
+        or as_number(record.get("periodicity_score")) >= 0.6
+    )
+    if callback_timing:
+        triggers.append("callback_timing=positive")
+        docs.append(TIMING_DOCS["callback"])
+    c2 = record.get("c2_indicators") or {}
+    if record.get("payload_visibility") == "encrypted_tls" and (
+        callback_timing or c2.get("fixed_remote_endpoint") or c2.get("periodic_connections")
+    ):
+        triggers.append("encrypted_timing_metadata=positive")
+        docs.extend(["observable_encrypted_visibility_limits", TIMING_DOCS["callback"]])
+    if benign_periodic_active(record):
+        triggers.append("benign_periodic_hints=positive")
+        docs.extend([TIMING_DOCS["benign_periodic"], TIMING_DOCS["callback"]])
+    if any(record.get(field) not in (None, "", [], {}) for field in (
+        "ordered_event_summary", "relative_time_deltas", "scan_to_exploit_delta",
+        "exploit_to_upload_delta", "upload_to_access_delta", "repeated_backdoor_access_intervals",
+    )):
+        triggers.append("ordered_event_sequence=positive")
+        docs.append(TIMING_DOCS["sequence"])
     docs.extend(BOUNDARY_DOCS[group] for group in groups)
     return dedupe(triggers), dedupe(docs), used
 
@@ -173,7 +219,7 @@ def detect_confusion_groups(record: dict[str, Any]) -> list[str]:
         groups.append("ta11_01_vs_ta11_02")
 
     outbound_context = service in {"dns", "http", "https", "ssl", "tls"} or bool(record.get("dns_summary")) or bool(record.get("tls_summary"))
-    if c2_active or has_callback or outbound_context:
+    if c2_active or has_callback or outbound_context or benign_periodic_active(record):
         groups.append("ta11_02_vs_tn01_01")
     return dedupe(groups)
 
@@ -187,7 +233,7 @@ def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
     add_term(terms, record.get("service"))
     add_term(terms, record.get("conn_state"))
     add_term(terms, record.get("history"))
-    for field in ("duration", "orig_pkts", "resp_pkts", "orig_bytes", "resp_bytes"):
+    for field in ("duration", "packet_rate", "byte_rate", "orig_pkts", "resp_pkts", "orig_bytes", "resp_bytes"):
         value = record.get(field)
         if value not in (None, "", "-"):
             terms.append(f"{field}={value}")
@@ -201,22 +247,37 @@ def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
     add_term(terms, record.get("payload_visibility"))
     add_term(terms, record.get("suspicious_payload_snippets"))
     add_term(terms, record.get("suspicious_uri_patterns"))
+    for field in (
+        "time_span", "inter_arrival_summary", "inter_attempt_intervals", "interval_summary",
+        "attempt_rate", "probe_rate", "burstiness_score", "periodicity_score", "regularity_score",
+        "beacon_score", "fixed_endpoint_duration", "failure_burst", "benign_periodic_hints",
+        "ordered_event_summary", "relative_time_deltas", "scan_to_exploit_delta",
+        "exploit_to_upload_delta", "upload_to_access_delta", "repeated_backdoor_access_intervals",
+    ):
+        if record.get(field) not in (None, "", [], {}) and (field != "benign_periodic_hints" or benign_periodic_active(record)):
+            terms.append(field)
+            add_term(terms, record.get(field))
 
     if record.get("record_type") == "auth_attempt_group":
         terms.extend(["authentication attempt group", "repeated login attempts", "authentication failures", "TA01_01"])
         add_term(terms, record.get("auth_protocol"))
         add_term(terms, record.get("failed_login_count"))
         add_term(terms, record.get("status_code_summary"))
+        add_term(terms, record.get("attempt_rate"))
+        add_term(terms, record.get("inter_attempt_intervals"))
+        terms.append("authentication failure timing burst")
         rules.append("auth_attempt_group:TA01_01_boundary")
     if record.get("record_type") == "c2_callback_group":
         terms.extend(["callback group", "fixed remote endpoint", "periodic connection pattern", "C2", "TA11_02"])
         add_term(terms, record.get("interval_summary"))
         add_term(terms, record.get("bytes_pattern"))
         add_term(terms, record.get("callback_direction_hint"))
+        add_term(terms, record.get("benign_periodic_hints"))
+        terms.extend(["beacon timing boundary", "benign periodic update telemetry DNS NTP"])
         rules.append("c2_callback_group:TA11_02_boundary")
 
     if record.get("record_type") == "scan_group":
-        terms.extend(["scan_group", "many destination ports", "failed connections", "port scan", "TA43_01"])
+        terms.extend(["scan_group", "many destination ports", "failed connections", "probe rate", "scan burst", "port scan", "TA43_01"])
         rules.append("scan_group:TA43_01")
     if as_number(record.get("same_src_unique_dst_ports")) >= 8 or as_number(record.get("unique_dst_ports")) >= 8:
         terms.extend(["many ports", "port scan", "TA43_01"])

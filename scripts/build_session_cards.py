@@ -61,6 +61,16 @@ def sample(values: list[Any], limit: int = 10) -> list[Any]:
     return out
 
 
+def safe_rate(total: int | float, duration: float | None) -> float | None:
+    if duration is None or duration <= 0:
+        return None
+    return round(float(total) / duration, 4)
+
+
+def uri_path(value: Any) -> str:
+    return str(value or "").split("?", 1)[0].split("#", 1)[0]
+
+
 def read_zeek_log(path: Path | None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if path is None or not path.exists() or not path.is_file():
@@ -220,6 +230,17 @@ def packet_time(row: dict[str, str]) -> float | None:
 
 def packet_len(row: dict[str, str]) -> int:
     return parse_int(row.get("frame.len") or row.get("length") or row.get("len")) or 0
+
+
+def ftp_rows_from_packets(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "command": row.get("ftp.request.command") or None,
+            "reply_code": row.get("ftp.response.code") or None,
+        }
+        for row in rows
+        if row.get("ftp.request.command") or row.get("ftp.response.code")
+    ]
 
 
 def observation_key(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
@@ -401,7 +422,14 @@ def build_cards_from_packets(
         if proto == "tcp" and syn_count > 0 and ack_count == 0:
             conn_state = "S0"
         service = next((str(row.get("_ws.col.Protocol") or "").lower() for row in rows if row.get("_ws.col.Protocol") and str(row.get("_ws.col.Protocol")).lower() not in {"tcp", "udp"}), None)
-        evidence = make_session_evidence(service, dst_port, [], mapped_observations, [], [], [], [], observation_source_available, mapping_method)
+        evidence = make_session_evidence(
+            service, dst_port, [], mapped_observations, [], [], [], ftp_rows_from_packets(rows),
+            observation_source_available, mapping_method,
+        )
+        evidence["extraction_warnings"] = [
+            *evidence.get("extraction_warnings", []),
+            "zeek_unavailable; session and application metadata use tshark fallback",
+        ]
         card = {
             "record_type": "session",
             "session_id": f"{pcap_id}::session::{idx:06d}",
@@ -428,6 +456,8 @@ def build_cards_from_packets(
             "dns_summary": make_dns_summary([{"query": row.get("dns.qry.name")} for row in rows if row.get("dns.qry.name")]),
             "tls_summary": make_tls_summary([{"server_name": row.get("tls.handshake.extensions_server_name")} for row in rows if row.get("tls.handshake.extensions_server_name")]),
         }
+        card["packet_rate"] = safe_rate((card["orig_pkts"] or 0) + (card["resp_pkts"] or 0), card["duration"])
+        card["byte_rate"] = safe_rate((card["orig_bytes"] or 0) + (card["resp_bytes"] or 0), card["duration"])
         cards.append(card)
     return cards
 
@@ -482,7 +512,7 @@ def build_cards_for_pcap(case_dir: Path, pcap_id: str) -> list[dict[str, Any]]:
             tls_by_uid.get(uid_text, []),
             files_by_uid.get(uid_text, []),
             ssh_by_uid.get(uid_text, []),
-            ftp_by_uid.get(uid_text, []),
+            ftp_by_uid.get(uid_text, []) or ftp_rows_from_packets(packets),
             observation_source_available,
             "zeek_uid" if http_by_uid.get(uid_text) else mapping_method,
         )
@@ -512,6 +542,8 @@ def build_cards_for_pcap(case_dir: Path, pcap_id: str) -> list[dict[str, Any]]:
             "dns_summary": make_dns_summary(dns_by_uid.get(str(uid), [])) if uid else None,
             "tls_summary": make_tls_summary(tls_by_uid.get(str(uid), [])) if uid else None,
         }
+        card["packet_rate"] = safe_rate((card["orig_pkts"] or 0) + (card["resp_pkts"] or 0), duration)
+        card["byte_rate"] = safe_rate((card["orig_bytes"] or 0) + (card["resp_bytes"] or 0), duration)
         cards.append(card)
     return cards
 
@@ -567,8 +599,11 @@ def add_context_features(cards: list[dict[str, Any]]) -> None:
             times = [value for value in times if value is not None]
             intervals = [b - a for a, b in zip(times, times[1:]) if b >= a]
             mean_interval = statistics.mean(intervals) if intervals else None
-            interval_cv = statistics.pstdev(intervals) / mean_interval if len(intervals) >= 2 and mean_interval and mean_interval > 0 else None
-            periodic = len(intervals) >= 3 and mean_interval is not None and mean_interval >= 0.02 and interval_cv is not None and interval_cv <= 0.35
+            interval_std = statistics.pstdev(intervals) if len(intervals) >= 2 else None
+            interval_cv = interval_std / mean_interval if interval_std is not None and mean_interval and mean_interval > 0 else None
+            median_interval = statistics.median(intervals) if intervals else None
+            regularity_score = 1 / (1 + interval_cv) if interval_cv is not None else 0.0
+            periodic = len(intervals) >= 3 and mean_interval is not None and mean_interval >= 1.0 and interval_cv is not None and interval_cv <= 0.35
             byte_totals = [int(c.get("orig_bytes") or 0) + int(c.get("resp_bytes") or 0) for c in endpoint_cards]
             small_repeated = len(byte_totals) >= 4 and max(byte_totals, default=0) <= 4096
             dns_queries = [q for c in endpoint_cards for q in (c.get("dns_summary") or {}).get("queries", [])]
@@ -584,6 +619,15 @@ def add_context_features(cards: list[dict[str, Any]]) -> None:
                 client_external = False
             unusual_port = bool(first.get("dst_port") and int(first.get("dst_port")) not in {21, 22, 23, 25, 53, 80, 110, 123, 143, 443, 445, 993, 995, 3389}) if str(first.get("dst_port") or "").isdigit() else False
             long_lived = any((parse_float(c.get("duration")) or 0) >= 300 for c in endpoint_cards)
+            fixed_endpoint_duration = max(0.0, (times[-1] - times[0])) if len(times) >= 2 else 0.0
+            app_blob = " ".join(
+                str(value) for card in endpoint_cards
+                for value in [*card.get("http_hosts", []), *card.get("http_uris_sample", [])]
+            ).lower()
+            update_like = any(word in app_blob for word in ("update", "telemetry", "health", "wpad", "sync", "ntp"))
+            ntp_like = str(first.get("proto")) == "udp" and str(first.get("dst_port")) == "123"
+            dns_refresh_like = str(first.get("dst_port")) == "53" and repeated_dns
+            explicit_callback_text = any(word in app_blob for word in ("callback", "beacon", "heartbeat", "checkin", "dummy-c2"))
             score = sum([
                 0.35 if periodic else 0.0,
                 0.15 if len(endpoint_cards) >= 4 else 0.0,
@@ -592,10 +636,13 @@ def add_context_features(cards: list[dict[str, Any]]) -> None:
                 0.1 if unusual_port else 0.0,
                 0.1 if client_external else 0.0,
                 0.05 if long_lived else 0.0,
+                0.2 if explicit_callback_text else 0.0,
             ])
             interval_summary = {
                 "count": len(intervals),
                 "mean_seconds": round(mean_interval, 3) if mean_interval is not None else None,
+                "median_seconds": round(median_interval, 3) if median_interval is not None else None,
+                "std_seconds": round(interval_std, 3) if interval_std is not None else None,
                 "cv": round(interval_cv, 3) if interval_cv is not None else None,
                 "min_seconds": round(min(intervals), 3) if intervals else None,
                 "max_seconds": round(max(intervals), 3) if intervals else None,
@@ -610,18 +657,30 @@ def add_context_features(cards: list[dict[str, Any]]) -> None:
                     "tls_sni_repeated": repeated_sni,
                     "unusual_port": unusual_port,
                     "client_initiated_external": client_external,
+                    "callback_text_hint": explicit_callback_text,
                     "beacon_score": round(min(score, 1.0), 3),
+                    "regularity_score": round(regularity_score, 3),
+                    "fixed_endpoint_duration": round(fixed_endpoint_duration, 3),
                     "interval_summary": interval_summary,
-                    "matched_keywords": [name for name, hit in (("periodic", periodic), ("fixed endpoint", len(endpoint_cards) >= 4), ("repeated DNS", repeated_dns), ("repeated SNI", repeated_sni)) if hit],
+                    "matched_keywords": [name for name, hit in (("periodic", periodic), ("fixed endpoint", len(endpoint_cards) >= 4), ("repeated DNS", repeated_dns), ("repeated SNI", repeated_sni), ("callback context", explicit_callback_text)) if hit],
+                }
+                card["benign_periodic_hints"] = {
+                    "common_service_port": str(first.get("dst_port")) in {"53", "80", "123", "443"},
+                    "update_or_telemetry_text": update_like,
+                    "dns_refresh_like": dns_refresh_like,
+                    "ntp_like": ntp_like,
+                    "short_burst_not_beacon": bool(median_interval is not None and median_interval < 1.0),
+                    "periodicity_alone": bool(periodic and not any((unusual_port, repeated_dns, repeated_sni, explicit_callback_text))),
                 }
 
         for pair_cards in by_src_dst.values():
             all_uris = [uri for c in pair_cards for uri in c.get("http_uris_sample", [])]
+            all_uri_paths = [uri_path(uri) for uri in all_uris]
             statuses = [code for c in pair_cards for code in c.get("http_status_codes", [])]
             backdoor_uris = [uri for c in pair_cards for uri in c.get("http_uris_sample", []) if any(word in str(uri).lower() for word in ("webshell", "shell.php", "cmd.php", "cmd.jsp", "c99", "r57"))]
             for card in pair_cards:
                 vuln = card.get("vuln_scan_indicators") or {}
-                vuln["high_uri_fanout"] = bool(vuln.get("high_uri_fanout") or len(set(all_uris)) >= 8)
+                vuln["high_uri_fanout"] = bool(vuln.get("high_uri_fanout") or len(set(all_uri_paths)) >= 8)
                 vuln["high_404_rate"] = bool(vuln.get("high_404_rate") or (len(statuses) >= 5 and sum(str(code) == "404" for code in statuses) / len(statuses) >= 0.6))
                 card["vuln_scan_indicators"] = vuln
                 backdoor = card.get("backdoor_access_indicators") or {}

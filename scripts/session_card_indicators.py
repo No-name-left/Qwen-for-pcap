@@ -340,23 +340,42 @@ def build_indicators(http: dict[str, Any], files: dict[str, Any], ssh_rows: list
     }
     ssh_attempts = [_integer(row.get("auth_attempts")) or 0 for row in ssh_rows]
     ssh_auth_failure_hint = any(str(row.get("auth_success")).lower() in {"f", "false"} for row in ssh_rows)
+    session_auth_attempt_count = max(len(login_paths), max(ssh_attempts, default=0), ftp_commands.count("PASS"))
+    ftp_failure_codes = {"430", "530"}
+    ftp_success_codes = {"230"}
+    ftp_failed = sum(str(row.get("reply_code")) in ftp_failure_codes for row in ftp_rows)
+    ftp_failure_seen = False
+    ftp_success_after_failure = False
+    for row in ftp_rows:
+        code = str(row.get("reply_code") or "")
+        ftp_failure_seen = ftp_failure_seen or code in ftp_failure_codes
+        ftp_success_after_failure = ftp_success_after_failure or (ftp_failure_seen and code in ftp_success_codes)
+    ssh_failed = sum(
+        max(1, _integer(row.get("auth_attempts")) or 0)
+        for row in ssh_rows if str(row.get("auth_success")).lower() in {"f", "false"}
+    )
     auth_context = bool(login_paths or http.get("http_auth_header_present") or ssh_rows or ftp_rows)
     auth_statuses = [code for code in status_codes if auth_context and str(code) in {"401", "403", "407", "200", "204", "302"}]
+    http_failed = sum(str(code) in {"401", "403", "407"} for code in auth_statuses)
+    failed_login_count = http_failed + ftp_failed + ssh_failed
     auth = {
         "auth_protocol": "ssh" if ssh_rows else "ftp" if ftp_rows else "http" if login_paths or http.get("http_auth_header_present") else "unknown",
-        "repeated_login_attempts": len(login_paths) >= 5 or max(ssh_attempts, default=0) >= 5 or ftp_commands.count("PASS") >= 5,
-        "failed_login_hint": any(str(code) in {"401", "403", "407"} for code in auth_statuses) or any(str(row.get("auth_success")).lower() in {"f", "false"} for row in ssh_rows),
-        "success_after_failures_hint": any(str(code) in {"401", "403", "407"} for code in auth_statuses) and any(str(code) in {"200", "204", "302"} for code in auth_statuses),
+        "repeated_login_attempts": session_auth_attempt_count >= 5,
+        "failed_login_hint": failed_login_count > 0,
+        "success_after_failures_hint": ftp_success_after_failure or (
+            http_failed > 0 and any(str(code) in {"200", "204", "302"} for code in auth_statuses)
+        ),
         "http_login_paths": _dedupe(login_paths),
         "auth_status_codes": _dedupe(auth_statuses),
-        "same_src_same_dst_auth_attempts": max(len(login_paths), max(ssh_attempts, default=0), ftp_commands.count("PASS")),
+        "session_auth_attempt_count": session_auth_attempt_count,
+        "same_src_same_dst_auth_attempts": session_auth_attempt_count,
         "username_field_seen": any(re.search(r"(?i)^(?:user|username)=", p) for p in http.get("suspicious_http_parameters", [])) or "USER" in ftp_commands,
         "password_field_seen": any(re.search(r"(?i)^(?:password|passwd|pwd)=", p) for p in http.get("suspicious_http_parameters", [])) or "PASS" in ftp_commands,
         "unique_usernames_seen": len(ftp_usernames) or (1 if any(re.search(r"(?i)^(?:user|username)=", p) for p in http.get("suspicious_http_parameters", [])) else 0),
-        "failed_login_count": sum(str(code) in {"401", "403", "407"} for code in auth_statuses) + sum(str(code) in {"430", "530"} for code in ftp_response_codes) + sum(str(row.get("auth_success")).lower() in {"f", "false"} for row in ssh_rows),
+        "failed_login_count": failed_login_count,
         "ftp_response_codes": ftp_response_codes,
         "ssh_auth_failure_hint": ssh_auth_failure_hint,
-        "weak_evidence": False,
+        "weak_evidence": session_auth_attempt_count >= 5 and failed_login_count == 0,
     }
 
     file_names = " ".join(files.get("filename_sample", []))
@@ -365,13 +384,14 @@ def build_indicators(http: dict[str, Any], files: dict[str, Any], ssh_rows: list
         "webshell_extension_hint", "payload_download_hint", "dropper_download_hint",
         "archive_or_executable_transfer_hint", "file_write_like_request",
     ])
-    implant.update({
-        "upload_to_server_hint": bool(http.get("http_upload_hints")) or bool(
+    upload_to_server_hint = bool(http.get("http_upload_hints")) or bool(
             "originator_to_responder" in files.get("direction_hint", [])
             and (files.get("filename_sample") or files.get("executable_or_script_hint") or files.get("archive_hint"))
-        ),
+        )
+    implant.update({
+        "upload_to_server_hint": upload_to_server_hint,
         "multipart_upload": bool(http.get("http_multipart_present")),
-        "suspicious_uploaded_filename": bool(SUSPICIOUS_FILE_RE.search(blob + " " + file_names)),
+        "suspicious_uploaded_filename": bool(upload_to_server_hint and SUSPICIOUS_FILE_RE.search(blob + " " + file_names)),
         "webshell_extension_hint": bool(WEB_SHELL_RE.search(blob + " " + file_names)),
         "payload_download_hint": bool(exploit.get("wget_curl_download")),
         "dropper_download_hint": bool(exploit.get("wget_curl_download") and files.get("executable_or_script_hint")),
@@ -385,14 +405,25 @@ def build_indicators(http: dict[str, Any], files: dict[str, Any], ssh_rows: list
         "attacker_initiated_access_hint", "response_output_like_hint",
         "repeated_backdoor_endpoint_access",
     ])
+    webshell_path_hint = bool(WEB_SHELL_RE.search(blob))
+    command_param_hint = bool(COMMAND_PARAM_RE.search(blob))
+    interactive_command_hint = bool(
+        exploit.get("shell_command_keyword") or exploit.get("windows_command_keyword") or exploit.get("linux_command_keyword")
+    )
     backdoor.update({
-        "webshell_path_hint": bool(WEB_SHELL_RE.search(blob)),
-        "command_param_hint": bool(COMMAND_PARAM_RE.search(blob)),
-        "interactive_command_hint": bool(exploit.get("shell_command_keyword") or exploit.get("windows_command_keyword") or exploit.get("linux_command_keyword")),
-        "attacker_initiated_access_hint": bool(WEB_SHELL_RE.search(blob) and http.get("http_methods")),
+        "webshell_path_hint": webshell_path_hint,
+        "command_param_hint": command_param_hint,
+        "interactive_command_hint": interactive_command_hint,
+        "attacker_initiated_access_hint": bool(webshell_path_hint and http.get("http_methods")),
         "response_output_like_hint": bool(http.get("response_body_snippets_sanitized") and exploit.get("shell_command_keyword")),
         "repeated_backdoor_endpoint_access": sum(1 for uri in http.get("http_uris_sample", []) if WEB_SHELL_RE.search(uri)) >= 2,
-        "matched_keywords": _dedupe([word for word in ("webshell", "cmd=", "command=", "exec=", "whoami", "shell command") if word.rstrip("=") in blob.lower()]),
+        "matched_keywords": _dedupe([
+            name for name, hit in (
+                ("webshell", webshell_path_hint),
+                ("command parameter", command_param_hint),
+                ("interactive command", interactive_command_hint),
+            ) if hit
+        ]),
     })
     return {
         "exploit_indicators": exploit,
