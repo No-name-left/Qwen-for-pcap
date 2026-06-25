@@ -108,10 +108,12 @@ thinking_control: chat_template_kwargs.enable_thinking
 PCAP 解析默认按以下顺序选择解析器：
 
 ```text
-system zeek -> Docker Zeek -> TShark fallback
+system Zeek -> Docker Zeek -> TShark fallback
 ```
 
-VM 默认 Docker image 为 `public.ecr.aws/zeek/zeek:8.0.6-arm64`。可用 `--zeek-docker-image` 覆盖，或用 `--no-prefer-zeek` / `--no-allow-tshark-fallback` 调整策略。`parse_all_summary.json`、`parse_errors.jsonl`、run summary 和 `config_effective.json` 会记录 `parser_source`、`zeek_success`、`tshark_success`、`zeek_error` 等字段。Docker Zeek 成功时，`parser_source` 为 `zeek_docker`，不会再把系统 `zeek` 缺失误报成 fallback。
+VM 默认 Docker image 为 `public.ecr.aws/zeek/zeek:8.0.6-arm64`。可用 `--zeek-docker-image` 覆盖，或用 `--no-prefer-zeek` / `--no-allow-tshark-fallback` 调整主解析策略。默认还会在 Zeek 成功后运行安全的 TShark observable supplement，只生成 `tshark/observable_http.jsonl` 这类摘要证据，用于补充 HTTP body 可见片段、可疑 URI/body 上下文和 upload hints；它不改变 `parser_source`、不生成额外 session、也不保存完整 HTTP body/raw payload/FTP 参数。可用 `--no-enable-tshark-observable-supplement` 或 `PHASE1_ENABLE_TSHARK_OBSERVABLE_SUPPLEMENT=false` 关闭。
+
+`parse_all_summary.json`、`parse_errors.jsonl`、run summary 和 `config_effective.json` 会记录 `parser_source`、`zeek_success`、`tshark_fallback_success`、`tshark_supplement_success`、`tshark_supplement_enabled`、`payload_supplement_source`、`zeek_error` 等字段。Docker Zeek 成功时，`parser_source` 为 `zeek_docker`；若 supplement 失败，只记录 warning，Zeek 主线仍继续。
 
 ## 5. 输出
 
@@ -137,7 +139,7 @@ Prompt 使用 `observable_timing_boundary_rag_v4`，Phase-1 stage-first、techni
 
 - `/data` 未挂载：先运行 `df -hT /data`、`findmnt /data`、`lsblk -f`，核实设备后再手动 mount。
 - API 连接失败：运行 `bash scripts/check_vm_ready.sh --check-api`，确认 `/v1/models` 和模型名；默认禁止 live 模式访问非回环地址。
-- Zeek/TShark 找不到：优先安装本机 Zeek；若使用 VM 默认 Docker Zeek，确认镜像 `public.ecr.aws/zeek/zeek:8.0.6-arm64` 已存在。readiness 和 runner 不会自动 pull 镜像；Zeek 与 Docker Zeek 都失败且 `allow_tshark_fallback=true` 时才会使用 TShark fallback。
+- Zeek/TShark 找不到：优先安装本机 Zeek；若使用 VM 默认 Docker Zeek，确认镜像 `public.ecr.aws/zeek/zeek:8.0.6-arm64` 已存在。readiness 和 runner 不会自动 pull 镜像；Zeek 与 Docker Zeek 都失败且 `allow_tshark_fallback=true` 时才会使用 TShark fallback。Zeek 成功但 TShark supplement 失败时，主流程不会失败，只会缺少 HTTP body/payload 摘要补充并在 summary 中记录 warning。
 - RAG 缺失：确认 `rag/metadata/rag_manifest.csv`、`rag/chunks/rag_chunks.jsonl`、`rag/index/keyword_index.json` 完整。
 - Prompt 超预算：减小 `--rag-top-k`，或增大 `--max-prompt-tokens`，同时确保模型上下文长度足够。
 - JSON 解析失败：查看 `failed_records.jsonl`，确认本地 Qwen/vLLM 接受 `chat_template_kwargs.enable_thinking=false`，修正服务模型名或输出约束后用同一目录 resume。

@@ -134,6 +134,7 @@ def effective_config(args: argparse.Namespace) -> dict[str, Any]:
         "enable_thinking": config_value(data, args, "enable_thinking", ["PHASE1_ENABLE_THINKING", "LLM_ENABLE_THINKING", "ENABLE_THINKING"], as_bool),
         "prefer_zeek": config_value(data, args, "prefer_zeek", ["PHASE1_PREFER_ZEEK"], as_bool),
         "allow_tshark_fallback": config_value(data, args, "allow_tshark_fallback", ["PHASE1_ALLOW_TSHARK_FALLBACK"], as_bool),
+        "enable_tshark_observable_supplement": config_value(data, args, "enable_tshark_observable_supplement", ["PHASE1_ENABLE_TSHARK_OBSERVABLE_SUPPLEMENT"], as_bool),
         "zeek_docker_image": config_value(data, args, "zeek_docker_image", ["PHASE1_ZEEK_DOCKER_IMAGE", "ZEEK_DOCKER_IMAGE"]),
         "save_prompt_samples": config_value(data, args, "save_prompt_samples", ["PHASE1_SAVE_PROMPT_SAMPLES"], as_bool),
         "prompt_sample_limit": config_value(data, args, "prompt_sample_limit", ["PHASE1_PROMPT_SAMPLE_LIMIT"], int),
@@ -144,6 +145,8 @@ def effective_config(args: argparse.Namespace) -> dict[str, Any]:
         values["prefer_zeek"] = True
     if values["allow_tshark_fallback"] is None:
         values["allow_tshark_fallback"] = True
+    if values["enable_tshark_observable_supplement"] is None:
+        values["enable_tshark_observable_supplement"] = True
     values["input_dir"] = Path(values["input_dir"]).expanduser().resolve()
     values["output_dir"] = Path(values["output_dir"]).expanduser().resolve()
     values["answer"] = Path(values["answer"]).expanduser().resolve() if values.get("answer") else None
@@ -172,6 +175,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--disable-thinking", dest="enable_thinking", action="store_false", default=None, help="Disable Qwen chat-template thinking mode for strict JSON output.")
     parser.add_argument("--prefer-zeek", action=argparse.BooleanOptionalAction, default=None, help="Prefer system/Docker Zeek before TShark fallback.")
     parser.add_argument("--allow-tshark-fallback", action=argparse.BooleanOptionalAction, default=None, help="Use TShark packet aggregation if Zeek is unavailable or fails.")
+    parser.add_argument("--enable-tshark-observable-supplement", action=argparse.BooleanOptionalAction, default=None, help="When Zeek succeeds, run safe TShark HTTP observable supplement extraction.")
     parser.add_argument("--zeek-docker-image", help="Local Docker Zeek image used when system Zeek is unavailable or fails.")
     parser.add_argument("--save-prompt-samples", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--prompt-sample-limit", type=int)
@@ -236,7 +240,12 @@ def create_parse_errors(summary: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "case_id": item.get("case_id"), "pcap": Path(str(item.get("pcap_path") or "")).name,
                 "parser_source": item.get("parser_source"),
                 "zeek_success": bool(item.get("zeek_success")), "tshark_success": bool(item.get("tshark_success")),
+                "tshark_fallback_success": bool(item.get("tshark_fallback_success")),
+                "tshark_supplement_enabled": bool(item.get("tshark_supplement_enabled")),
+                "tshark_supplement_success": bool(item.get("tshark_supplement_success")),
+                "payload_supplement_source": item.get("payload_supplement_source"),
                 "zeek_error": item.get("zeek_error"), "tshark_error": item.get("tshark_error"),
+                "tshark_supplement_error": item.get("tshark_supplement_error"),
                 "warnings": warnings,
             })
     return errors
@@ -250,7 +259,11 @@ def prepare_evidence(config: dict[str, Any], paths: dict[str, Path], pcaps: list
     parsed_names = {Path(str(item.get("pcap_path") or "")).name for item in parse_summary}
     current_names = {path.name for path in pcaps}
     neutral_ids = all(re.fullmatch(r"phase1_\d{3}", str(item.get("case_id") or "")) for item in parse_summary)
-    parse_reused = bool(len(parse_summary) == len(pcaps) and parsed_names == current_names and neutral_ids and previous_manifest == current_manifest)
+    parse_config_matches = all(
+        item.get("tshark_supplement_enabled") == config["enable_tshark_observable_supplement"]
+        for item in parse_summary
+    )
+    parse_reused = bool(len(parse_summary) == len(pcaps) and parsed_names == current_names and neutral_ids and previous_manifest == current_manifest and parse_config_matches)
     if parse_reused:
         print(f"[SKIP] parse: resume found {len(pcaps)} matching cases", flush=True)
     else:
@@ -262,6 +275,7 @@ def prepare_evidence(config: dict[str, Any], paths: dict[str, Path], pcaps: list
             "--neutral-case-ids",
             "--prefer-zeek" if config["prefer_zeek"] else "--no-prefer-zeek",
             "--allow-tshark-fallback" if config["allow_tshark_fallback"] else "--no-allow-tshark-fallback",
+            "--enable-tshark-observable-supplement" if config["enable_tshark_observable_supplement"] else "--no-enable-tshark-observable-supplement",
         ]
         if config.get("zeek_docker_image"):
             parse_cmd.extend(["--zeek-docker-image", str(config["zeek_docker_image"])])
@@ -522,6 +536,7 @@ def safe_config_report(config: dict[str, Any]) -> dict[str, Any]:
         "request_timeout": config["request_timeout"], "max_retries": config["max_retries"],
         "enable_thinking": config["enable_thinking"], "thinking_control": "chat_template_kwargs.enable_thinking",
         "prefer_zeek": config["prefer_zeek"], "allow_tshark_fallback": config["allow_tshark_fallback"],
+        "enable_tshark_observable_supplement": config["enable_tshark_observable_supplement"],
         "zeek_docker_image": config.get("zeek_docker_image"),
         "save_prompt_samples": config["save_prompt_samples"], "prompt_sample_limit": config["prompt_sample_limit"], "prompt_version": PROMPT_VERSION,
     }
@@ -543,6 +558,7 @@ def write_summary(config: dict[str, Any], paths: dict[str, Path], stats: dict[st
         "## Parser controls", "",
         f"- prefer_zeek: `{str(config['prefer_zeek']).lower()}`",
         f"- allow_tshark_fallback: `{str(config['allow_tshark_fallback']).lower()}`",
+        f"- enable_tshark_observable_supplement: `{str(config['enable_tshark_observable_supplement']).lower()}`",
         f"- zeek_docker_image: `{config.get('zeek_docker_image') or ''}`", "",
         "## Safety boundaries", "",
         "- Answer data was not loaded before prompt generation or inference.",

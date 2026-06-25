@@ -64,12 +64,14 @@ class Phase1PromptTests(unittest.TestCase):
             "limit": 5, "rag_top_k": 4, "max_prompt_tokens": 6000, "request_timeout": 180,
             "max_retries": 2, "enable_thinking": False, "save_prompt_samples": True, "prompt_sample_limit": 5,
             "prefer_zeek": True, "allow_tshark_fallback": True, "zeek_docker_image": "zeek:test",
+            "enable_tshark_observable_supplement": True,
         }
         report = safe_config_report(config)
         self.assertNotIn("api_key", report)
         self.assertNotIn("very-secret", json.dumps(report))
         self.assertEqual(report["thinking_control"], "chat_template_kwargs.enable_thinking")
         self.assertFalse(report["enable_thinking"])
+        self.assertTrue(report["enable_tshark_observable_supplement"])
 
     def test_qwen_extra_body_uses_chat_template_kwargs(self) -> None:
         payload = qwen_extra_body(False)
@@ -135,18 +137,30 @@ class Phase1ParserSelectionTests(unittest.TestCase):
                 return 0, "", ""
             raise AssertionError(f"unexpected command: {cmd}")
 
+        def fake_extract(_pcap: Path, output: Path):
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text("", encoding="utf-8")
+            return 0, 0, ""
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             pcap = root / "sample.pcap"
             pcap.touch()
-            with patch("parse_public_pcaps.command_exists", fake_command_exists), patch("parse_public_pcaps.run", fake_run):
+            with (
+                patch("parse_public_pcaps.command_exists", fake_command_exists),
+                patch("parse_public_pcaps.run", fake_run),
+                patch("parse_public_pcaps.extract_safe_http_observations", fake_extract),
+            ):
                 summary = parse_case("case1", pcap, root / "parsed", zeek_docker_image="zeek:test")
 
         self.assertTrue(summary["zeek_success"])
         self.assertFalse(summary["tshark_attempted"])
+        self.assertTrue(summary["tshark_supplement_attempted"])
+        self.assertTrue(summary["tshark_supplement_success"])
         self.assertEqual(summary["parser_source"], "zeek_docker")
         self.assertEqual(summary["zeek_error"], "")
         self.assertEqual(summary["warnings"], [])
+        self.assertEqual(summary["payload_supplement_source"], "tshark_observable")
 
     def test_docker_zeek_failure_falls_back_to_tshark_when_allowed(self) -> None:
         def fake_command_exists(name: str, env: dict | None = None) -> bool:
@@ -175,12 +189,50 @@ class Phase1ParserSelectionTests(unittest.TestCase):
 
         self.assertFalse(summary["zeek_success"])
         self.assertTrue(summary["tshark_success"])
+        self.assertTrue(summary["tshark_fallback_success"])
         self.assertTrue(summary["tshark_attempted"])
+        self.assertFalse(summary["tshark_supplement_attempted"])
         self.assertEqual(summary["parser_source"], "tshark_fallback")
         self.assertIn("docker zeek failed", summary["zeek_error"])
         self.assertTrue(any("using tshark packet aggregation fallback" in warning for warning in summary["warnings"]))
 
-    def test_system_zeek_success_sets_zeek_parser_source(self) -> None:
+    def test_system_zeek_success_runs_observable_supplement(self) -> None:
+        def fake_command_exists(name: str, env: dict | None = None) -> bool:
+            return name == "zeek"
+
+        def fake_run(cmd: list[str], cwd=None, env=None, stdout_path=None):
+            if cmd and cmd[0] == "zeek":
+                Path(cwd).joinpath("conn.log").write_text("#fields\tts\tuid\n", encoding="utf-8")
+                return 0, "", ""
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        def fake_extract(_pcap: Path, output: Path):
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text('{"body_observed": true}\n', encoding="utf-8")
+            return 0, 1, ""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pcap = root / "sample.pcap"
+            pcap.touch()
+            with (
+                patch("parse_public_pcaps.command_exists", fake_command_exists),
+                patch("parse_public_pcaps.run", fake_run),
+                patch("parse_public_pcaps.extract_safe_http_observations", fake_extract),
+            ):
+                summary = parse_case("case1", pcap, root / "parsed", zeek_docker_image="zeek:test")
+
+        self.assertTrue(summary["zeek_success"])
+        self.assertFalse(summary["tshark_success"])
+        self.assertFalse(summary["tshark_attempted"])
+        self.assertTrue(summary["tshark_supplement_attempted"])
+        self.assertTrue(summary["tshark_supplement_success"])
+        self.assertEqual(summary["tshark_supplement_rows"], 1)
+        self.assertEqual(summary["payload_supplement_source"], "tshark_observable")
+        self.assertEqual(summary["parser_source"], "zeek_conn")
+        self.assertEqual(summary["zeek_mode"], "system")
+
+    def test_system_zeek_success_continues_when_supplement_fails(self) -> None:
         def fake_command_exists(name: str, env: dict | None = None) -> bool:
             return name == "zeek"
 
@@ -194,14 +246,52 @@ class Phase1ParserSelectionTests(unittest.TestCase):
             root = Path(tmp)
             pcap = root / "sample.pcap"
             pcap.touch()
-            with patch("parse_public_pcaps.command_exists", fake_command_exists), patch("parse_public_pcaps.run", fake_run):
+            with (
+                patch("parse_public_pcaps.command_exists", fake_command_exists),
+                patch("parse_public_pcaps.run", fake_run),
+                patch("parse_public_pcaps.extract_safe_http_observations", return_value=(1, 0, "<Error> tshark failed")),
+            ):
                 summary = parse_case("case1", pcap, root / "parsed", zeek_docker_image="zeek:test")
 
         self.assertTrue(summary["zeek_success"])
-        self.assertFalse(summary["tshark_success"])
-        self.assertFalse(summary["tshark_attempted"])
         self.assertEqual(summary["parser_source"], "zeek_conn")
-        self.assertEqual(summary["zeek_mode"], "system")
+        self.assertTrue(summary["tshark_supplement_attempted"])
+        self.assertFalse(summary["tshark_supplement_success"])
+        self.assertEqual(summary["payload_supplement_source"], "none")
+        self.assertTrue(any("observable supplement failed" in warning for warning in summary["warnings"]))
+
+    def test_system_zeek_success_skips_disabled_supplement(self) -> None:
+        def fake_command_exists(name: str, env: dict | None = None) -> bool:
+            return name == "zeek"
+
+        def fake_run(cmd: list[str], cwd=None, env=None, stdout_path=None):
+            if cmd and cmd[0] == "zeek":
+                Path(cwd).joinpath("conn.log").write_text("#fields\tts\tuid\n", encoding="utf-8")
+                return 0, "", ""
+            raise AssertionError(f"unexpected command: {cmd}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pcap = root / "sample.pcap"
+            pcap.touch()
+            with (
+                patch("parse_public_pcaps.command_exists", fake_command_exists),
+                patch("parse_public_pcaps.run", fake_run),
+                patch("parse_public_pcaps.extract_safe_http_observations") as extract_mock,
+            ):
+                summary = parse_case(
+                    "case1",
+                    pcap,
+                    root / "parsed",
+                    zeek_docker_image="zeek:test",
+                    enable_tshark_observable_supplement=False,
+                )
+
+        self.assertTrue(summary["zeek_success"])
+        self.assertFalse(summary["tshark_supplement_attempted"])
+        self.assertFalse(summary["tshark_supplement_success"])
+        self.assertEqual(summary["payload_supplement_source"], "none")
+        extract_mock.assert_not_called()
 
 
 class Phase1EvaluationTests(unittest.TestCase):

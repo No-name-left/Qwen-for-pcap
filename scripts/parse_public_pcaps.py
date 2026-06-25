@@ -131,7 +131,7 @@ def sanitize_zeek_application_logs(zeek_dir: Path) -> None:
                 for field in ("username", "password"):
                     if field in row and row[field] not in {"", "-"}:
                         parts[fields.index(field)] = "[REDACTED]"
-            elif str(row.get("command") or "").upper() == "PASS" and "arg" in fields:
+            elif str(row.get("command") or "").upper() in {"USER", "PASS"} and "arg" in fields:
                 parts[fields.index("arg")] = "[REDACTED]"
             out.append("\t".join(parts))
         path.write_text("\n".join(out) + "\n", encoding="utf-8")
@@ -166,6 +166,15 @@ def run_tshark_fallback(pcap_abs: Path, tshark_dir: Path) -> tuple[bool, int, st
     observable_rc, observable_http_count, observable_err = extract_safe_http_observations(pcap_abs, observable_http)
     if observable_rc != 0:
         return True, observable_http_count, f"tshark observable HTTP extraction failed rc={observable_rc}: {concise_error(observable_err)}"
+    return True, observable_http_count, ""
+
+
+def run_tshark_observable_supplement(pcap_abs: Path, tshark_dir: Path) -> tuple[bool, int, str]:
+    """Extract supplemental HTTP observable evidence without changing the main parser."""
+    observable_http = tshark_dir / "observable_http.jsonl"
+    observable_rc, observable_http_count, observable_err = extract_safe_http_observations(pcap_abs, observable_http)
+    if observable_rc != 0:
+        return False, observable_http_count, f"tshark observable supplement failed rc={observable_rc}: {concise_error(observable_err)}"
     return True, observable_http_count, ""
 
 
@@ -284,6 +293,7 @@ def parse_case(
     prefer_zeek: bool = True,
     allow_tshark_fallback: bool = True,
     zeek_docker_image: str | None = None,
+    enable_tshark_observable_supplement: bool = True,
 ) -> dict:
     pcap_abs = pcap.resolve()
     case_dir = output_dir / case_id
@@ -296,9 +306,13 @@ def parse_case(
     packets_csv = tshark_dir / "packets.csv"
     observable_http = tshark_dir / "observable_http.jsonl"
     observable_http_count = 0
-    tshark_attempted = False
-    tshark_success = False
-    tshark_error = ""
+    tshark_fallback_attempted = False
+    tshark_fallback_success = False
+    tshark_fallback_error = ""
+    tshark_supplement_attempted = False
+    tshark_supplement_success = False
+    tshark_supplement_error = ""
+    tshark_supplement_rows = 0
     zeek_success = False
     zeek_error = ""
     zeek_mode = "not_attempted"
@@ -324,29 +338,49 @@ def parse_case(
     if not zeek_success:
         (zeek_dir / "zeek_run.stderr").write_text(zeek_error + "\n", encoding="utf-8")
         if allow_tshark_fallback:
-            tshark_attempted = True
-            tshark_success, observable_http_count, tshark_error = run_tshark_fallback(pcap_abs, tshark_dir)
-            if tshark_success:
+            tshark_fallback_attempted = True
+            tshark_fallback_success, observable_http_count, tshark_fallback_error = run_tshark_fallback(pcap_abs, tshark_dir)
+            if tshark_fallback_success:
                 parser_source = "tshark_fallback"
-            if tshark_error:
-                warnings.append(tshark_error)
-            if tshark_success:
+            if tshark_fallback_error:
+                warnings.append(tshark_fallback_error)
+            if tshark_fallback_success:
                 warnings.append(f"Zeek unavailable or failed ({zeek_error}); using tshark packet aggregation fallback")
             else:
                 warnings.append(f"Zeek unavailable or failed ({zeek_error}); tshark fallback failed")
         else:
             warnings.append(f"Zeek unavailable or failed ({zeek_error}); tshark fallback disabled")
+    elif enable_tshark_observable_supplement:
+        tshark_supplement_attempted = True
+        tshark_supplement_success, tshark_supplement_rows, tshark_supplement_error = run_tshark_observable_supplement(pcap_abs, tshark_dir)
+        observable_http_count = tshark_supplement_rows
+        if tshark_supplement_error:
+            warnings.append(tshark_supplement_error)
 
     zeek_logs = [f for f in list_files(zeek_dir) if f.endswith(".log") and not f.startswith("zeek_run.")]
+    payload_supplement_source = "tshark_observable" if (
+        (tshark_supplement_success or tshark_fallback_success) and observable_http.exists()
+    ) else "none"
 
     return {
         "case_id": case_id,
         "pcap_path": display_path(pcap),
         "pcap_size": pcap.stat().st_size if pcap.exists() else None,
+        "prefer_zeek": prefer_zeek,
+        "allow_tshark_fallback": allow_tshark_fallback,
         "parser_source": parser_source,
-        "tshark_success": tshark_success and packets_csv.exists() and packets_csv.stat().st_size > 0,
-        "tshark_attempted": tshark_attempted,
-        "tshark_error": tshark_error,
+        "tshark_success": tshark_fallback_success and packets_csv.exists() and packets_csv.stat().st_size > 0,
+        "tshark_attempted": tshark_fallback_attempted,
+        "tshark_error": tshark_fallback_error,
+        "tshark_fallback_success": tshark_fallback_success and packets_csv.exists() and packets_csv.stat().st_size > 0,
+        "tshark_fallback_attempted": tshark_fallback_attempted,
+        "tshark_fallback_error": tshark_fallback_error,
+        "tshark_supplement_enabled": enable_tshark_observable_supplement,
+        "tshark_supplement_attempted": tshark_supplement_attempted,
+        "tshark_supplement_success": tshark_supplement_success,
+        "tshark_supplement_error": tshark_supplement_error,
+        "tshark_supplement_rows": tshark_supplement_rows,
+        "payload_supplement_source": payload_supplement_source,
         "zeek_success": zeek_success,
         "zeek_mode": zeek_mode,
         "zeek_docker_image": zeek_docker_image,
@@ -368,6 +402,7 @@ def main() -> int:
     parser.add_argument("--neutral-case-ids", action="store_true", help="Do not expose source filenames in generated case/session identifiers.")
     parser.add_argument("--prefer-zeek", action=argparse.BooleanOptionalAction, default=True, help="Prefer system/Docker Zeek before TShark fallback.")
     parser.add_argument("--allow-tshark-fallback", action=argparse.BooleanOptionalAction, default=True, help="Use TShark packet aggregation if Zeek is unavailable or fails.")
+    parser.add_argument("--enable-tshark-observable-supplement", action=argparse.BooleanOptionalAction, default=True, help="When Zeek succeeds, also run safe TShark HTTP observable extraction.")
     parser.add_argument("--zeek-docker-image", default=os.environ.get("ZEEK_DOCKER_IMAGE", DEFAULT_ZEEK_DOCKER_IMAGE), help="Local Docker image to use when system Zeek is unavailable or fails.")
     args = parser.parse_args()
 
@@ -381,6 +416,7 @@ def main() -> int:
             prefer_zeek=args.prefer_zeek,
             allow_tshark_fallback=args.allow_tshark_fallback,
             zeek_docker_image=args.zeek_docker_image,
+            enable_tshark_observable_supplement=args.enable_tshark_observable_supplement,
         )
         for case_id, pcap in cases
     ]

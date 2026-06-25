@@ -388,7 +388,7 @@ def make_session_evidence(
         "evidence_limits": dict(EVIDENCE_LIMITS),
         "evidence_mapping": {
             "method": mapping_method,
-            "confidence": "high" if mapping_method in {"zeek_uid", "tcp_stream"} else "medium" if mapping_method == "bidirectional_five_tuple" else "not_applicable",
+            "confidence": "high" if mapping_method.startswith("zeek_uid") or mapping_method == "tcp_stream" else "medium" if mapping_method == "bidirectional_five_tuple" else "not_applicable",
         },
         "http_summary": http_summary,
         **http,
@@ -521,6 +521,9 @@ def build_cards_for_pcap(case_dir: Path, pcap_id: str, zeek_parser_source: str =
                 mapping_method = "bidirectional_five_tuple"
         service = row.get("service") if row.get("service") != "-" else None
         uid_text = str(uid) if uid else ""
+        evidence_mapping_method = "zeek_uid" if http_by_uid.get(uid_text) else mapping_method
+        if http_by_uid.get(uid_text) and mapped_observations:
+            evidence_mapping_method = f"zeek_uid+{mapping_method}"
         evidence = make_session_evidence(
             service,
             dst_port,
@@ -531,7 +534,7 @@ def build_cards_for_pcap(case_dir: Path, pcap_id: str, zeek_parser_source: str =
             ssh_by_uid.get(uid_text, []),
             ftp_by_uid.get(uid_text, []) or ftp_rows_from_packets(packets),
             observation_source_available,
-            "zeek_uid" if http_by_uid.get(uid_text) else mapping_method,
+            evidence_mapping_method,
         )
         card = {
             "record_type": "session",
