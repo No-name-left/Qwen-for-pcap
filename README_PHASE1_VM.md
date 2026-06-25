@@ -92,6 +92,19 @@ bash run_phase1_vm.sh \
 
 配置优先级为 CLI、环境变量、`configs/phase1_vm.yaml`。可用参数还包括 `--limit`、`--rag-top-k`、`--max-prompt-tokens`、`--request-timeout` 和 `--max-retries`。
 
+本地 Qwen/vLLM 默认关闭 thinking，以减少正文中出现推理文本导致 JSON 解析失败的风险。runner 发送的 OpenAI-compatible 扩展参数是：
+
+```python
+extra_body={"chat_template_kwargs": {"enable_thinking": False}}
+```
+
+默认配置为 `enable_thinking: false`，也可用 `--disable-thinking` 或 `--enable-thinking` 显式覆盖。run summary 和 `config_effective.json` 会记录：
+
+```text
+enable_thinking: false
+thinking_control: chat_template_kwargs.enable_thinking
+```
+
 ## 5. 输出
 
 运行目录包含：
@@ -119,7 +132,7 @@ Prompt 使用 `observable_timing_boundary_rag_v4`，Phase-1 stage-first、techni
 - Zeek/TShark 找不到：安装本机命令；readiness 只识别已经存在的 Zeek Docker image，不会自动 pull。
 - RAG 缺失：确认 `rag/metadata/rag_manifest.csv`、`rag/chunks/rag_chunks.jsonl`、`rag/index/keyword_index.json` 完整。
 - Prompt 超预算：减小 `--rag-top-k`，或增大 `--max-prompt-tokens`，同时确保模型上下文长度足够。
-- JSON 解析失败：查看 `failed_records.jsonl`，修正服务模型名或输出约束后用同一目录 resume。
+- JSON 解析失败：查看 `failed_records.jsonl`，确认本地 Qwen/vLLM 接受 `chat_template_kwargs.enable_thinking=false`，修正服务模型名或输出约束后用同一目录 resume。
 - 预测与答案无法对齐：查看 `unmatched_rows.csv`；评估器优先使用 `pcap+编号`，再尝试唯一编号和网络可观察字段签名，不会静默丢行。
 
 ## 7. 当前边界

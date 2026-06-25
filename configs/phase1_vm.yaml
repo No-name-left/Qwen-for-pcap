@@ -14,4 +14,5 @@ max_prompt_tokens: 6000
 save_prompt_samples: true
 request_timeout: 120
 max_retries: 2
+enable_thinking: false
 prompt_sample_limit: 5

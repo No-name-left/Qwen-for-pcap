@@ -157,7 +157,9 @@ def instruction_block() -> str:
     return (
         f"PROMPT_VERSION: {PROMPT_VERSION}\n"
         "Classify exactly one PCAP session or behavioral group into the official closed set. Predict technique_code only; stage_code is derived by the program.\n"
-        "Return exactly one JSON object and no Markdown, Thinking Process, or text outside JSON.\n"
+        "Return exactly one JSON object.\n"
+        "Do not output Markdown, a Thinking Process, or explanations before or after JSON.\n"
+        "The first character must be \"{\" and the last character must be \"}\".\n"
         "The record is primary evidence. RAG is boundary guidance only; when RAG conflicts with observed behavior, follow the record.\n"
         "Observable indicators are network-side evidence: they may show an attempt, upload, or command text but do not prove host-side execution, persistence, or success.\n"
         "Use only this record and same-PCAP aggregates. Never use IP/domain reputation or context from another PCAP.\n"
@@ -181,7 +183,9 @@ def phase1_instruction_block() -> str:
     return (
         f"PROMPT_VERSION: {PROMPT_VERSION}\n"
         "Classify exactly one PCAP session or behavioral group for Phase-1 scoring. Predict stage_code first; technique_guess is optional best-effort detail and never overrides stage_code.\n"
-        "Return exactly one JSON object and no Markdown, Thinking Process, or text outside JSON.\n"
+        "Return exactly one JSON object.\n"
+        "Do not output Markdown, a Thinking Process, or explanations before or after JSON.\n"
+        "The first character must be \"{\" and the last character must be \"}\".\n"
         "The record is primary evidence. RAG is decision-boundary guidance only; when RAG conflicts with observed behavior, follow the record.\n"
         "Never use an answer table, ground truth, expected label, or any label-bearing evaluation artifact.\n"
         "Use only network-visible evidence from this record and same-PCAP aggregates. Do not infer host execution, persistence success, identity, reputation, or hidden encrypted payload.\n"

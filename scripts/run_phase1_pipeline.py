@@ -46,6 +46,11 @@ def as_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def qwen_extra_body(enable_thinking: bool) -> dict[str, Any]:
+    """Build the vLLM/Qwen chat-template extension used to control thinking."""
+    return {"chat_template_kwargs": {"enable_thinking": bool(enable_thinking)}}
+
+
 def load_json(path: Path, default: Any = None) -> Any:
     if not path.exists():
         return default
@@ -126,9 +131,12 @@ def effective_config(args: argparse.Namespace) -> dict[str, Any]:
         "max_prompt_tokens": config_value(data, args, "max_prompt_tokens", ["PHASE1_MAX_PROMPT_TOKENS", "LLM_MAX_PROMPT_TOKENS"], int),
         "request_timeout": config_value(data, args, "request_timeout", ["PHASE1_REQUEST_TIMEOUT", "LLM_REQUEST_TIMEOUT"], float),
         "max_retries": config_value(data, args, "max_retries", ["PHASE1_MAX_RETRIES"], int),
+        "enable_thinking": config_value(data, args, "enable_thinking", ["PHASE1_ENABLE_THINKING", "LLM_ENABLE_THINKING", "ENABLE_THINKING"], as_bool),
         "save_prompt_samples": config_value(data, args, "save_prompt_samples", ["PHASE1_SAVE_PROMPT_SAMPLES"], as_bool),
         "prompt_sample_limit": config_value(data, args, "prompt_sample_limit", ["PHASE1_PROMPT_SAMPLE_LIMIT"], int),
     }
+    if values["enable_thinking"] is None:
+        values["enable_thinking"] = False
     values["input_dir"] = Path(values["input_dir"]).expanduser().resolve()
     values["output_dir"] = Path(values["output_dir"]).expanduser().resolve()
     values["answer"] = Path(values["answer"]).expanduser().resolve() if values.get("answer") else None
@@ -153,6 +161,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-prompt-tokens", type=int)
     parser.add_argument("--request-timeout", type=float)
     parser.add_argument("--max-retries", type=int)
+    parser.add_argument("--enable-thinking", dest="enable_thinking", action="store_true", default=None, help="Enable Qwen chat-template thinking mode.")
+    parser.add_argument("--disable-thinking", dest="enable_thinking", action="store_false", default=None, help="Disable Qwen chat-template thinking mode for strict JSON output.")
     parser.add_argument("--save-prompt-samples", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--prompt-sample-limit", type=int)
     parser.add_argument("--allow-remote-base-url", action="store_true", help="Explicitly allow a non-loopback OpenAI-compatible endpoint.")
@@ -440,7 +450,7 @@ def run_api(config: dict[str, Any], paths: dict[str, Path], records: list[dict[s
                 response = client.chat.completions.create(
                     model=config["model"], messages=[{"role": "user", "content": prompt}],
                     temperature=0, top_p=0.8, max_tokens=384, stream=False,
-                    extra_body={"enable_thinking": False},
+                    extra_body=qwen_extra_body(config["enable_thinking"]),
                 )
                 content = response.choices[0].message.content or ""
                 parsed = validate_prediction(extract_json_object(content), records_by_id[record_id])
@@ -487,6 +497,7 @@ def safe_config_report(config: dict[str, Any]) -> dict[str, Any]:
         "answer_configured": bool(config.get("answer")), "dry_run": config["dry_run"], "resume": config["resume"],
         "limit": config["limit"], "rag_top_k": config["rag_top_k"], "max_prompt_tokens": config["max_prompt_tokens"],
         "request_timeout": config["request_timeout"], "max_retries": config["max_retries"],
+        "enable_thinking": config["enable_thinking"], "thinking_control": "chat_template_kwargs.enable_thinking",
         "save_prompt_samples": config["save_prompt_samples"], "prompt_sample_limit": config["prompt_sample_limit"], "prompt_version": PROMPT_VERSION,
     }
 
@@ -501,6 +512,9 @@ def write_summary(config: dict[str, Any], paths: dict[str, Path], stats: dict[st
         f"- Failed records: {stats.get('failures', 0)}", f"- API requests attempted: {stats.get('api_calls', 0)}",
         f"- Prompt profile: `{PROMPT_VERSION}`", f"- Maximum estimated prompt tokens: {stats.get('max_prompt_tokens', 0)} / {config['max_prompt_tokens']}",
         f"- Prompts with RAG context: {stats.get('prompts_with_rag', 0)}", "",
+        "## Model request controls", "",
+        f"- enable_thinking: `{str(config['enable_thinking']).lower()}`",
+        "- thinking_control: `chat_template_kwargs.enable_thinking`", "",
         "## Safety boundaries", "",
         "- Answer data was not loaded before prompt generation or inference.",
         "- No raw model response body is persisted; only validated JSON and response metadata are stored.",
