@@ -19,6 +19,7 @@ BOUNDARY_DOCS = {
     "ta01_02_vs_ta11_01": "observable_exploit_indicator_mapping",
     "ta03_01_vs_ta01_02": "observable_file_upload_and_implant_hints",
     "ta03_01_vs_ta11_01": "observable_file_upload_and_implant_hints",
+    "ta01_02_vs_ta03_01_vs_ta11_01": "observable_exploit_upload_access_sequence",
 }
 
 INDICATOR_DOCS = {
@@ -111,6 +112,40 @@ def benign_periodic_active(record: dict[str, Any]) -> bool:
     return direct or bool(hints.get("short_burst_not_beacon") and field_indicator_active(record, "c2_indicators"))
 
 
+def record_blob(record: dict[str, Any], fields: tuple[str, ...]) -> str:
+    values = {field: record.get(field) for field in fields if record.get(field) not in (None, "", [], {})}
+    return json.dumps(values, ensure_ascii=False).lower()
+
+
+def http_404_rate_high(record: dict[str, Any]) -> bool:
+    statuses = record.get("http_status_codes") or []
+    if isinstance(statuses, dict):
+        statuses = list(statuses.values())
+    codes = [str(value) for value in statuses if value not in (None, "", "-")]
+    return len(codes) >= 5 and sum(code == "404" for code in codes) / len(codes) >= 0.5
+
+
+def uri_fanout_high(record: dict[str, Any]) -> bool:
+    uris = record.get("http_uris_sample") or []
+    paths = {str(uri).split("?", 1)[0].split("#", 1)[0].lower() for uri in uris if uri not in (None, "", "-")}
+    return len(paths) >= 5
+
+
+def probe_path_or_cve_active(record: dict[str, Any]) -> bool:
+    blob = record_blob(record, ("http_uris_sample", "http_full_uri_sample", "suspicious_uri_patterns", "vuln_scan_indicators"))
+    probe_terms = (
+        "cve-", "phpmyadmin", "wp-admin", "wp-login", "/.git", "cgi-bin", "hnap1",
+        "server-status", "../", "etc/passwd", "dirbuster", "gobuster",
+    )
+    return any(term in blob for term in probe_terms)
+
+
+def scanner_user_agent_active(record: dict[str, Any]) -> bool:
+    blob = record_blob(record, ("http_user_agents", "vuln_scan_indicators"))
+    scanners = ("nikto", "openvas", "nessus", "nmap", "nmap nse", "sqlmap", "wpscan", "acunetix", "burp", "zaproxy")
+    return any(scanner in blob for scanner in scanners)
+
+
 def targeted_rag_metadata(record: dict[str, Any], groups: list[str]) -> tuple[list[str], list[str], list[str]]:
     used = indicator_fields_used(record)
     triggers: list[str] = []
@@ -128,6 +163,40 @@ def targeted_rag_metadata(record: dict[str, Any], groups: list[str]) -> tuple[li
     if record.get("record_type") == "scan_group" and record.get("probe_rate") is not None:
         triggers.append("scan_timing=positive")
         docs.append(TIMING_DOCS["scan"])
+    port_fanout = max(
+        as_number(record.get("same_src_unique_dst_ports")),
+        as_number(record.get("unique_dst_ports")),
+        as_number(record.get("same_src_unique_dst_ips")),
+    ) >= 8
+    if port_fanout:
+        triggers.append("port_or_target_fanout=positive")
+        docs.extend([BOUNDARY_DOCS["ta43_01_vs_ta43_02"], TIMING_DOCS["scan"]])
+    vuln = record.get("vuln_scan_indicators") or {}
+    if vuln.get("high_uri_fanout") or uri_fanout_high(record):
+        triggers.append("uri_fanout=positive")
+        docs.extend([BOUNDARY_DOCS["ta43_01_vs_ta43_02"], INDICATOR_DOCS["vuln_scan_indicators"]])
+    if vuln.get("high_404_rate") or http_404_rate_high(record):
+        triggers.append("http_404_rate=positive")
+        docs.extend([BOUNDARY_DOCS["ta43_01_vs_ta43_02"], INDICATOR_DOCS["vuln_scan_indicators"]])
+    if vuln.get("scanner_user_agents") or scanner_user_agent_active(record):
+        triggers.append("scanner_user_agent=positive")
+        docs.extend([BOUNDARY_DOCS["ta43_01_vs_ta43_02"], INDICATOR_DOCS["vuln_scan_indicators"]])
+    if vuln.get("cve_probe_hint") or vuln.get("suspicious_probe_paths") or probe_path_or_cve_active(record):
+        triggers.append("cve_or_probe_path=positive")
+        docs.extend([BOUNDARY_DOCS["ta43_01_vs_ta43_02"], INDICATOR_DOCS["vuln_scan_indicators"]])
+    auth = record.get("auth_indicators") or {}
+    if as_number(record.get("failed_login_count") or auth.get("failed_login_count")) > 0:
+        triggers.append("failed_login_count=positive")
+        docs.extend([BOUNDARY_DOCS["ta01_01_vs_tn01_01"], INDICATOR_DOCS["auth_indicators"], TIMING_DOCS["auth"]])
+    if record.get("attempt_rate") is not None or auth.get("attempt_rate") is not None:
+        triggers.append("attempt_rate=positive")
+        docs.extend([BOUNDARY_DOCS["ta01_01_vs_tn01_01"], TIMING_DOCS["auth"]])
+    if record.get("failure_burst") or auth.get("failure_burst"):
+        triggers.append("failure_burst=positive")
+        docs.extend([BOUNDARY_DOCS["ta01_01_vs_tn01_01"], TIMING_DOCS["auth"]])
+    if record.get("success_after_failures_hint") or auth.get("success_after_failures_hint"):
+        triggers.append("success_after_failures=positive")
+        docs.extend([BOUNDARY_DOCS["ta01_01_vs_tn01_01"], INDICATOR_DOCS["auth_indicators"]])
     callback_timing = record.get("interval_summary") and (
         record.get("record_type") == "c2_callback_group"
         or as_number(record.get("beacon_score")) >= 0.5
@@ -138,6 +207,15 @@ def targeted_rag_metadata(record: dict[str, Any], groups: list[str]) -> tuple[li
         triggers.append("callback_timing=positive")
         docs.append(TIMING_DOCS["callback"])
     c2 = record.get("c2_indicators") or {}
+    if c2.get("fixed_remote_endpoint") or c2.get("source_initiated_fixed_endpoint"):
+        triggers.append("fixed_endpoint=positive")
+        docs.extend([BOUNDARY_DOCS["ta11_02_vs_tn01_01"], TIMING_DOCS["callback"]])
+    if c2.get("dns_repeated_query") or c2.get("tls_sni_repeated") or record.get("dns_query_repetition") or record.get("tls_sni_repetition"):
+        triggers.append("dns_sni_repetition=positive")
+        docs.extend([BOUNDARY_DOCS["ta11_02_vs_tn01_01"], TIMING_DOCS["callback"]])
+    if record.get("bytes_pattern") or c2.get("small_repeated_payload"):
+        triggers.append("packet_size_pattern=positive")
+        docs.extend([BOUNDARY_DOCS["ta11_02_vs_tn01_01"], TIMING_DOCS["callback"]])
     if record.get("payload_visibility") == "encrypted_tls" and (
         callback_timing or c2.get("fixed_remote_endpoint") or c2.get("periodic_connections")
     ):
@@ -152,6 +230,23 @@ def targeted_rag_metadata(record: dict[str, Any], groups: list[str]) -> tuple[li
     )):
         triggers.append("ordered_event_sequence=positive")
         docs.append(TIMING_DOCS["sequence"])
+    chain_blob = record_blob(record, (
+        "exploit_indicators", "implant_indicators", "backdoor_access_indicators",
+        "http_multipart_present", "http_upload_hints", "transferred_files_summary",
+        "suspicious_http_parameters", "suspicious_uri_patterns",
+    ))
+    if (
+        field_indicator_active(record, "exploit_indicators")
+        and (field_indicator_active(record, "implant_indicators") or field_indicator_active(record, "backdoor_access_indicators"))
+    ) or any(term in chain_blob for term in ("multipart", "webshell", "cmd=", "command=", "exec=", "upload", "filename")):
+        triggers.append("exploit_upload_access_boundary=positive")
+        docs.extend([
+            TIMING_DOCS["sequence"],
+            INDICATOR_DOCS["exploit_indicators"],
+            INDICATOR_DOCS["implant_indicators"],
+            INDICATOR_DOCS["backdoor_access_indicators"],
+            "competition_backdoor_implant_access_callback_boundary",
+        ])
     docs.extend(BOUNDARY_DOCS[group] for group in groups)
     return dedupe(triggers), dedupe(docs), used
 
@@ -210,6 +305,12 @@ def detect_confusion_groups(record: dict[str, Any]) -> list[str]:
         groups.append("ta01_02_vs_ta11_01")
     if implant_active:
         groups.extend(["ta03_01_vs_ta01_02", "ta03_01_vs_ta11_01"])
+    if (
+        any(record.get(field) not in (None, "", [], {}) for field in ("ordered_event_summary", "exploit_to_upload_delta", "upload_to_access_delta"))
+        or (exploit_active and (implant_active or backdoor_active))
+        or (implant_active and backdoor_active)
+    ):
+        groups.append("ta01_02_vs_ta03_01_vs_ta11_01")
 
     access_words = ("backdoor access", "webshell", "reverse shell", "interactive shell", "operator", "shell command")
     callback_words = ("callback", "beacon", "checkin", "botnet")
@@ -259,7 +360,11 @@ def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
             add_term(terms, record.get(field))
 
     if record.get("record_type") == "auth_attempt_group":
-        terms.extend(["authentication attempt group", "repeated login attempts", "authentication failures", "TA01_01"])
+        terms.extend([
+            "authentication attempt group", "repeated login attempts", "authentication failures",
+            "failed_login_count", "attempt_rate", "inter-attempt interval", "failure burst",
+            "success after failures", "single failed login is not brute force", "FTP SSH HTTP login", "TA01_01",
+        ])
         add_term(terms, record.get("auth_protocol"))
         add_term(terms, record.get("failed_login_count"))
         add_term(terms, record.get("status_code_summary"))
@@ -273,14 +378,14 @@ def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
         add_term(terms, record.get("bytes_pattern"))
         add_term(terms, record.get("callback_direction_hint"))
         add_term(terms, record.get("benign_periodic_hints"))
-        terms.extend(["beacon timing boundary", "benign periodic update telemetry DNS NTP"])
+        terms.extend(["beacon timing boundary", "benign periodic update telemetry DNS NTP WPAD cloud sync health check", "packet size pattern", "TLS SNI DNS query fixed endpoint"])
         rules.append("c2_callback_group:TA11_02_boundary")
 
     if record.get("record_type") == "scan_group":
-        terms.extend(["scan_group", "many destination ports", "failed connections", "probe rate", "scan burst", "port scan", "TA43_01"])
+        terms.extend(["scan_group", "many destination ports", "dst_port fanout", "target fanout", "failed connections", "probe rate", "burstiness_score", "scan burst", "port scan", "TA43_01"])
         rules.append("scan_group:TA43_01")
     if as_number(record.get("same_src_unique_dst_ports")) >= 8 or as_number(record.get("unique_dst_ports")) >= 8:
-        terms.extend(["many ports", "port scan", "TA43_01"])
+        terms.extend(["many ports", "port fanout", "dst_port fanout", "port scan", "TA43_01"])
         rules.append("many_ports:TA43_01")
     if as_number(record.get("same_src_failed_conn_rate")) >= 0.5 or as_number(record.get("failed_conn_rate")) >= 0.5:
         terms.extend(["failed connection rate", "reconnaissance", "TA43_01"])
@@ -296,22 +401,22 @@ def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
     blob = json.dumps(legacy_values, ensure_ascii=False).lower()
     blob_tokens = set(re.findall(r"[a-z0-9_+-]+", blob))
     if field_indicator_active(record, "vuln_scan_indicators") or any(s in blob for s in ["vulnerability scan", "scanner", "nikto", "nessus", "openvas", "version probe"]):
-        terms.extend(["vulnerability scan signs", "TA43_02"])
+        terms.extend(["vulnerability scan signs", "URI fanout", "HTTP 404 rate", "scanner User-Agent", "CVE path", "probe path keywords", "directory scan", "TA43_02"])
         rules.append("vulnerability_scan:TA43_02")
     if field_indicator_active(record, "auth_indicators") or any(s in blob for s in ["login", "authentication", "bruteforce", "brute force", "ssh", "ftp", "rdp"]):
-        terms.extend(["login failures", "password bruteforce", "TA01_01"])
+        terms.extend(["login failures", "password bruteforce", "failed_login_count", "attempt_rate", "failure burst", "success-after-failure hint", "TA01_01"])
         rules.append("login_failures:TA01_01")
     if field_indicator_active(record, "exploit_indicators") or any(s in blob for s in ["exploit", "cve", "command injection", "sql injection", "xss", "ms17-010"]):
-        terms.extend(["exploit alert", "payload", "vulnerability exploitation", "TA01_02"])
+        terms.extend(["exploit request", "payload", "vulnerability exploitation", "command injection", "SQLi", "path traversal", "malicious parameter", "TA01_02"])
         rules.append("exploit_payload:TA01_02")
     if field_indicator_active(record, "implant_indicators") or any(s in blob for s in ["implant", "persistence", "webshell", "backdoor placement"]):
-        terms.extend(["implant", "persistence", "TA03_01"])
+        terms.extend(["implant", "persistence", "multipart/form-data", "webshell filename", "payload delivery", "TA03_01"])
         rules.append("implant:TA03_01")
     if field_indicator_active(record, "backdoor_access_indicators") or any(s in blob for s in ["backdoor access", "reverse shell", "webshell command"]):
-        terms.extend(["backdoor access", "TA11_01"])
+        terms.extend(["backdoor access", "backdoor endpoint", "cmd parameter", "command interaction", "TA11_01"])
         rules.append("backdoor_access:TA11_01")
     if field_indicator_active(record, "c2_indicators") or any(s in blob for s in ["callback", "c2", "cnc", "beacon", "checkin"]) or "rat" in blob_tokens:
-        terms.extend(["callback", "C2", "periodic beacon", "TA11_02"])
+        terms.extend(["callback", "C2", "periodic beacon", "beacon_score", "regularity_score", "fixed endpoint", "benign periodic boundary", "TA11_02"])
         rules.append("callback_c2:TA11_02")
 
     packets = (record.get("orig_pkts") or 0) + (record.get("resp_pkts") or 0)

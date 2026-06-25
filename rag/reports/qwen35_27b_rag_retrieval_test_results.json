@@ -75,10 +75,10 @@
       "zeek_conn_log_fields"
     ],
     "retrieved_doc_ids": [
+      "boundary_ta43_01_vs_ta43_02",
       "competition_TA43_01_port_scan",
       "competition_port_scan_vs_vulnerability_scan",
-      "port_scan_detection",
-      "reconnaissance_stage"
+      "port_scan_detection"
     ],
     "pass": true
   },
@@ -141,9 +141,8 @@
       "web_exploit_detection"
     ],
     "retrieved_doc_ids": [
-      "boundary_ta01_02_vs_tn01_01",
-      "competition_TA01_02_exploit",
-      "observable_exploit_indicator_mapping",
+      "boundary_ta43_01_vs_ta43_02",
+      "observable_exploit_upload_access_sequence",
       "signature_directory_traversal",
       "web_exploit_detection"
     ],
@@ -159,8 +158,7 @@
     ],
     "retrieved_doc_ids": [
       "boundary_ta01_02_vs_tn01_01",
-      "competition_TA01_02_exploit",
-      "competition_TA11_01_backdoor_access",
+      "observable_exploit_upload_access_sequence",
       "signature_command_injection",
       "web_exploit_detection"
     ],
@@ -292,7 +290,7 @@
       "boundary_ta01_02_vs_tn01_01",
       "competition_TA01_02_exploit",
       "competition_TN01_01_normal_business",
-      "competition_boundary_TA11_02_vs_TN01_01",
+      "competition_backdoor_implant_access_callback_boundary",
       "normal_http_vs_web_exploit"
     ],
     "pass": true
@@ -323,7 +321,7 @@
       "competition_TN01_01_normal_business",
       "competition_boundary_TA11_02_vs_TN01_01",
       "competition_conservative_normal_vs_callback_boundary",
-      "competition_normal_business_traffic_boundary"
+      "observable_beacon_timing_boundary"
     ],
     "pass": true
   },
@@ -334,9 +332,8 @@
       "observable_exploit_indicator_mapping"
     ],
     "retrieved_doc_ids": [
-      "competition_TA11_01_backdoor_access",
+      "competition_backdoor_implant_access_callback_boundary",
       "competition_boundary_TA03_01_vs_TA11_01_vs_TA11_02",
-      "competition_technique_codes",
       "observable_exploit_indicator_mapping",
       "observable_exploit_upload_access_sequence"
     ],
@@ -364,11 +361,10 @@
       "observable_file_upload_and_implant_hints"
     ],
     "retrieved_doc_ids": [
-      "boundary_ta01_02_vs_tn01_01",
       "competition_TA03_01_backdoor_install",
-      "competition_boundary_TA03_01_vs_TA11_01_vs_TA11_02",
-      "observable_file_upload_and_implant_hints",
-      "signature_webshell"
+      "competition_backdoor_implant_access_callback_boundary",
+      "observable_exploit_upload_access_sequence",
+      "observable_file_upload_and_implant_hints"
     ],
     "pass": true
   },
@@ -379,11 +375,11 @@
       "observable_backdoor_access_vs_callback"
     ],
     "retrieved_doc_ids": [
-      "boundary_ta11_01_vs_ta11_02",
       "boundary_ta11_02_vs_tn01_01",
+      "competition_backdoor_implant_access_callback_boundary",
       "observable_backdoor_access_vs_callback",
       "observable_beacon_timing_boundary",
-      "signature_webshell"
+      "observable_exploit_upload_access_sequence"
     ],
     "pass": true
   },
@@ -394,11 +390,11 @@
       "observable_auth_bruteforce_indicators"
     ],
     "retrieved_doc_ids": [
-      "bruteforce_detection",
+      "boundary_ta01_01_vs_tn01_01",
       "competition_TA01_01_bruteforce",
-      "competition_boundary_TA01_01_vs_TN01_01",
       "competition_bruteforce_boundary",
-      "observable_auth_bruteforce_indicators"
+      "observable_auth_bruteforce_indicators",
+      "observable_auth_bruteforce_timing"
     ],
     "pass": true
   },
@@ -410,8 +406,8 @@
     ],
     "retrieved_doc_ids": [
       "boundary_ta01_02_vs_tn01_01",
+      "boundary_ta11_02_vs_tn01_01",
       "competition_TN01_01_normal_business",
-      "competition_boundary_TA11_02_vs_TN01_01",
       "competition_normal_business_traffic_boundary",
       "observable_encrypted_visibility_limits"
     ],
@@ -424,8 +420,8 @@
       "observable_auth_bruteforce_timing"
     ],
     "retrieved_doc_ids": [
+      "boundary_ta01_01_vs_tn01_01",
       "bruteforce_detection",
-      "competition_TA01_01_bruteforce",
       "competition_boundary_TA01_01_vs_TN01_01",
       "observable_auth_bruteforce_indicators",
       "observable_auth_bruteforce_timing"
@@ -440,10 +436,10 @@
     ],
     "retrieved_doc_ids": [
       "boundary_ta43_01_vs_ta43_02",
-      "competition_TA43_01_port_scan",
       "competition_boundary_TA43_01_vs_TA43_02",
       "competition_port_scan_vs_vulnerability_scan",
-      "observable_scan_probe_timing"
+      "observable_scan_probe_timing",
+      "observable_vulnerability_scan_indicators"
     ],
     "pass": true
   },
@@ -471,6 +467,87 @@
     ],
     "retrieved_doc_ids": [
       "observable_exploit_upload_access_sequence"
+    ],
+    "pass": true
+  },
+  {
+    "query_id": "q031_hard_port_scan_boundary",
+    "query": "port scan query dst_port fanout many ports high failed_conn_rate probe_rate burstiness TA43_01 TA43_02 boundary",
+    "expected_doc_ids": [
+      "boundary_ta43_01_vs_ta43_02",
+      "observable_scan_probe_timing"
+    ],
+    "retrieved_doc_ids": [
+      "boundary_ta43_01_vs_ta43_02",
+      "competition_TA43_01_port_scan",
+      "competition_boundary_TA43_01_vs_TA43_02",
+      "competition_port_scan_vs_vulnerability_scan",
+      "observable_scan_probe_timing"
+    ],
+    "pass": true
+  },
+  {
+    "query_id": "q032_hard_vuln_scan_boundary",
+    "query": "vulnerability scan query URI fanout HTTP 404 rate scanner User-Agent CVE path probe path keywords TA43_02",
+    "expected_doc_ids": [
+      "boundary_ta43_01_vs_ta43_02",
+      "observable_vulnerability_scan_indicators"
+    ],
+    "retrieved_doc_ids": [
+      "boundary_ta43_01_vs_ta43_02",
+      "competition_TA43_02_vulnerability_scan",
+      "competition_boundary_TA43_01_vs_TA43_02",
+      "observable_scan_probe_timing",
+      "observable_vulnerability_scan_indicators"
+    ],
+    "pass": true
+  },
+  {
+    "query_id": "q033_hard_bruteforce_boundary",
+    "query": "brute force query auth_attempt_group failed_login_count attempt_rate inter-attempt interval failure burst success-after-failure SSH FTP HTTP login",
+    "expected_doc_ids": [
+      "boundary_ta01_01_vs_tn01_01",
+      "observable_auth_bruteforce_indicators",
+      "observable_auth_bruteforce_timing"
+    ],
+    "retrieved_doc_ids": [
+      "boundary_ta01_01_vs_tn01_01",
+      "competition_TA01_01_bruteforce",
+      "competition_bruteforce_boundary",
+      "observable_auth_bruteforce_indicators",
+      "observable_auth_bruteforce_timing"
+    ],
+    "pass": true
+  },
+  {
+    "query_id": "q034_hard_exploit_upload_access_boundary",
+    "query": "exploit upload access query command injection SQLi path traversal multipart/form-data webshell filename payload delivery backdoor endpoint cmd parameter TA01_02 TA03_01 TA11_01",
+    "expected_doc_ids": [
+      "competition_backdoor_implant_access_callback_boundary",
+      "observable_exploit_upload_access_sequence"
+    ],
+    "retrieved_doc_ids": [
+      "boundary_ta01_02_vs_tn01_01",
+      "competition_backdoor_implant_access_callback_boundary",
+      "observable_backdoor_access_vs_callback",
+      "observable_exploit_upload_access_sequence"
+    ],
+    "pass": true
+  },
+  {
+    "query_id": "q035_hard_beacon_periodic_boundary",
+    "query": "beacon periodic query beacon_score regularity_score fixed endpoint small packets TLS SNI DNS query software update DNS refresh NTP cloud sync health check WPAD TA11_02 TN01_01",
+    "expected_doc_ids": [
+      "boundary_ta11_02_vs_tn01_01",
+      "normal_periodic_connection_vs_c2",
+      "observable_beacon_timing_boundary"
+    ],
+    "retrieved_doc_ids": [
+      "boundary_ta11_02_vs_tn01_01",
+      "competition_boundary_TA11_02_vs_TN01_01",
+      "normal_periodic_connection_vs_c2",
+      "observable_beacon_timing_boundary",
+      "observable_encrypted_visibility_limits"
     ],
     "pass": true
   }

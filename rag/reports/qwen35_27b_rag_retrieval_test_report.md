@@ -1,7 +1,7 @@
 # Qwen3.5-27B RAG retrieval test report
 
-- Queries: 30
-- Passed: 30/30
+- Queries: 35
+- Passed: 35/35
 - Ready for retrieval test: yes
 
 ## q001_strrat_cnc_checkin
@@ -27,7 +27,7 @@
 ## q005_many_destination_ports_failed_connections
 - pass: True
 - expected: port_scan_detection, reconnaissance_stage, zeek_conn_log_fields
-- retrieved: competition_TA43_01_port_scan, competition_port_scan_vs_vulnerability_scan, port_scan_detection, reconnaissance_stage
+- retrieved: boundary_ta43_01_vs_ta43_02, competition_TA43_01_port_scan, competition_port_scan_vs_vulnerability_scan, port_scan_detection
 
 ## q006_tcp_syn_scan
 - pass: True
@@ -47,12 +47,12 @@
 ## q009_directory_traversal_passwd
 - pass: True
 - expected: protocol_http, signature_directory_traversal, web_exploit_detection
-- retrieved: boundary_ta01_02_vs_tn01_01, competition_TA01_02_exploit, observable_exploit_indicator_mapping, signature_directory_traversal, web_exploit_detection
+- retrieved: boundary_ta43_01_vs_ta43_02, observable_exploit_upload_access_sequence, signature_directory_traversal, web_exploit_detection
 
 ## q010_command_injection_wget_curl_shell
 - pass: True
 - expected: protocol_http, signature_command_injection, web_exploit_detection
-- retrieved: boundary_ta01_02_vs_tn01_01, competition_TA01_02_exploit, competition_TA11_01_backdoor_access, signature_command_injection, web_exploit_detection
+- retrieved: boundary_ta01_02_vs_tn01_01, observable_exploit_upload_access_sequence, signature_command_injection, web_exploit_detection
 
 ## q011_dns_tunnel_long_domain
 - pass: True
@@ -92,7 +92,7 @@
 ## q018_boundary_exploit_vs_normal
 - pass: True
 - expected: boundary_ta01_02_vs_tn01_01
-- retrieved: boundary_ta01_02_vs_tn01_01, competition_TA01_02_exploit, competition_TN01_01_normal_business, competition_boundary_TA11_02_vs_TN01_01, normal_http_vs_web_exploit
+- retrieved: boundary_ta01_02_vs_tn01_01, competition_TA01_02_exploit, competition_TN01_01_normal_business, competition_backdoor_implant_access_callback_boundary, normal_http_vs_web_exploit
 
 ## q019_boundary_backdoor_access_vs_callback
 - pass: True
@@ -102,12 +102,12 @@
 ## q020_boundary_callback_vs_normal
 - pass: True
 - expected: boundary_ta11_02_vs_tn01_01
-- retrieved: boundary_ta11_02_vs_tn01_01, competition_TN01_01_normal_business, competition_boundary_TA11_02_vs_TN01_01, competition_conservative_normal_vs_callback_boundary, competition_normal_business_traffic_boundary
+- retrieved: boundary_ta11_02_vs_tn01_01, competition_TN01_01_normal_business, competition_boundary_TA11_02_vs_TN01_01, competition_conservative_normal_vs_callback_boundary, observable_beacon_timing_boundary
 
 ## q021_observable_exploit_strings
 - pass: True
 - expected: observable_exploit_indicator_mapping
-- retrieved: competition_TA11_01_backdoor_access, competition_boundary_TA03_01_vs_TA11_01_vs_TA11_02, competition_technique_codes, observable_exploit_indicator_mapping, observable_exploit_upload_access_sequence
+- retrieved: competition_backdoor_implant_access_callback_boundary, competition_boundary_TA03_01_vs_TA11_01_vs_TA11_02, observable_exploit_indicator_mapping, observable_exploit_upload_access_sequence
 
 ## q022_observable_vuln_scan
 - pass: True
@@ -117,32 +117,32 @@
 ## q023_observable_implant_upload
 - pass: True
 - expected: observable_file_upload_and_implant_hints
-- retrieved: boundary_ta01_02_vs_tn01_01, competition_TA03_01_backdoor_install, competition_boundary_TA03_01_vs_TA11_01_vs_TA11_02, observable_file_upload_and_implant_hints, signature_webshell
+- retrieved: competition_TA03_01_backdoor_install, competition_backdoor_implant_access_callback_boundary, observable_exploit_upload_access_sequence, observable_file_upload_and_implant_hints
 
 ## q024_observable_access_callback
 - pass: True
 - expected: observable_backdoor_access_vs_callback
-- retrieved: boundary_ta11_01_vs_ta11_02, boundary_ta11_02_vs_tn01_01, observable_backdoor_access_vs_callback, observable_beacon_timing_boundary, signature_webshell
+- retrieved: boundary_ta11_02_vs_tn01_01, competition_backdoor_implant_access_callback_boundary, observable_backdoor_access_vs_callback, observable_beacon_timing_boundary, observable_exploit_upload_access_sequence
 
 ## q025_observable_auth
 - pass: True
 - expected: observable_auth_bruteforce_indicators
-- retrieved: bruteforce_detection, competition_TA01_01_bruteforce, competition_boundary_TA01_01_vs_TN01_01, competition_bruteforce_boundary, observable_auth_bruteforce_indicators
+- retrieved: boundary_ta01_01_vs_tn01_01, competition_TA01_01_bruteforce, competition_bruteforce_boundary, observable_auth_bruteforce_indicators, observable_auth_bruteforce_timing
 
 ## q026_observable_encrypted
 - pass: True
 - expected: observable_encrypted_visibility_limits
-- retrieved: boundary_ta01_02_vs_tn01_01, competition_TN01_01_normal_business, competition_boundary_TA11_02_vs_TN01_01, competition_normal_business_traffic_boundary, observable_encrypted_visibility_limits
+- retrieved: boundary_ta01_02_vs_tn01_01, boundary_ta11_02_vs_tn01_01, competition_TN01_01_normal_business, competition_normal_business_traffic_boundary, observable_encrypted_visibility_limits
 
 ## q027_auth_timing
 - pass: True
 - expected: observable_auth_bruteforce_timing
-- retrieved: bruteforce_detection, competition_TA01_01_bruteforce, competition_boundary_TA01_01_vs_TN01_01, observable_auth_bruteforce_indicators, observable_auth_bruteforce_timing
+- retrieved: boundary_ta01_01_vs_tn01_01, bruteforce_detection, competition_boundary_TA01_01_vs_TN01_01, observable_auth_bruteforce_indicators, observable_auth_bruteforce_timing
 
 ## q028_scan_timing
 - pass: True
 - expected: observable_scan_probe_timing
-- retrieved: boundary_ta43_01_vs_ta43_02, competition_TA43_01_port_scan, competition_boundary_TA43_01_vs_TA43_02, competition_port_scan_vs_vulnerability_scan, observable_scan_probe_timing
+- retrieved: boundary_ta43_01_vs_ta43_02, competition_boundary_TA43_01_vs_TA43_02, competition_port_scan_vs_vulnerability_scan, observable_scan_probe_timing, observable_vulnerability_scan_indicators
 
 ## q029_beacon_benign_timing
 - pass: True
@@ -153,3 +153,28 @@
 - pass: True
 - expected: observable_exploit_upload_access_sequence
 - retrieved: observable_exploit_upload_access_sequence
+
+## q031_hard_port_scan_boundary
+- pass: True
+- expected: boundary_ta43_01_vs_ta43_02, observable_scan_probe_timing
+- retrieved: boundary_ta43_01_vs_ta43_02, competition_TA43_01_port_scan, competition_boundary_TA43_01_vs_TA43_02, competition_port_scan_vs_vulnerability_scan, observable_scan_probe_timing
+
+## q032_hard_vuln_scan_boundary
+- pass: True
+- expected: boundary_ta43_01_vs_ta43_02, observable_vulnerability_scan_indicators
+- retrieved: boundary_ta43_01_vs_ta43_02, competition_TA43_02_vulnerability_scan, competition_boundary_TA43_01_vs_TA43_02, observable_scan_probe_timing, observable_vulnerability_scan_indicators
+
+## q033_hard_bruteforce_boundary
+- pass: True
+- expected: boundary_ta01_01_vs_tn01_01, observable_auth_bruteforce_indicators, observable_auth_bruteforce_timing
+- retrieved: boundary_ta01_01_vs_tn01_01, competition_TA01_01_bruteforce, competition_bruteforce_boundary, observable_auth_bruteforce_indicators, observable_auth_bruteforce_timing
+
+## q034_hard_exploit_upload_access_boundary
+- pass: True
+- expected: competition_backdoor_implant_access_callback_boundary, observable_exploit_upload_access_sequence
+- retrieved: boundary_ta01_02_vs_tn01_01, competition_backdoor_implant_access_callback_boundary, observable_backdoor_access_vs_callback, observable_exploit_upload_access_sequence
+
+## q035_hard_beacon_periodic_boundary
+- pass: True
+- expected: boundary_ta11_02_vs_tn01_01, normal_periodic_connection_vs_c2, observable_beacon_timing_boundary
+- retrieved: boundary_ta11_02_vs_tn01_01, competition_boundary_TA11_02_vs_TN01_01, normal_periodic_connection_vs_c2, observable_beacon_timing_boundary, observable_encrypted_visibility_limits
