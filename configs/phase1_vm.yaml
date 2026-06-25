@@ -15,4 +15,7 @@ save_prompt_samples: true
 request_timeout: 120
 max_retries: 2
 enable_thinking: false
+prefer_zeek: true
+allow_tshark_fallback: true
+zeek_docker_image: public.ecr.aws/zeek/zeek:8.0.6-arm64
 prompt_sample_limit: 5

@@ -6,6 +6,7 @@ CHECK_API=0
 BASE_URL="${LLM_BASE_URL:-${BASE_URL:-http://127.0.0.1:8000/v1}}"
 MODEL="${LLM_MODEL_NAME:-${MODEL:-qwen3.5}}"
 API_KEY="${LLM_API_KEY:-${API_KEY:-EMPTY}}"
+ZEEK_DOCKER_IMAGE="${ZEEK_DOCKER_IMAGE:-public.ecr.aws/zeek/zeek:8.0.6-arm64}"
 PASS=0
 WARN=0
 FAIL=0
@@ -68,10 +69,10 @@ command -v tshark >/dev/null 2>&1 && pass "tshark: $(tshark --version 2>/dev/nul
 if command -v zeek >/dev/null 2>&1; then
   pass "zeek: $(zeek --version 2>&1 | head -n 1)"
 elif command -v docker >/dev/null 2>&1; then
-  if docker image inspect "${ZEEK_DOCKER_IMAGE:-zeek/zeek}" >/dev/null 2>&1; then
-    warn "zeek binary is missing; local Docker image ${ZEEK_DOCKER_IMAGE:-zeek/zeek} is available as a manual fallback"
+  if docker image inspect "$ZEEK_DOCKER_IMAGE" >/dev/null 2>&1; then
+    warn "zeek binary is missing; local Docker image $ZEEK_DOCKER_IMAGE is available for runner fallback"
   else
-    fail 'zeek is missing and no local Zeek Docker image is available (the checker will not pull one)'
+    fail "zeek is missing and local Zeek Docker image $ZEEK_DOCKER_IMAGE is unavailable (the checker will not pull one)"
   fi
 else
   fail 'zeek is missing and Docker fallback is unavailable'

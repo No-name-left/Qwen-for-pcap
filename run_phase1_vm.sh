@@ -65,6 +65,7 @@ fi
 mkdir -p "$OUTPUT_DIR"
 printf 'Phase-1 VM runner starting. Output: %s\n' "$OUTPUT_DIR"
 printf 'Qwen thinking control: chat_template_kwargs.enable_thinking defaults to false; override with --enable-thinking or --disable-thinking.\n'
+printf 'Parser order: system zeek -> Docker Zeek image -> TShark fallback; override with --zeek-docker-image/--no-allow-tshark-fallback.\n'
 set +e
 python3 "$ROOT/scripts/run_phase1_pipeline.py" "${ARGS[@]}" 2>&1 | tee -a "$OUTPUT_DIR/run.log"
 STATUS=${PIPESTATUS[0]}

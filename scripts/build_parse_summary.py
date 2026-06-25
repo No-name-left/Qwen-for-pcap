@@ -22,14 +22,15 @@ def main() -> int:
         f"- Parsed dir: `{args.parsed_dir.relative_to(ROOT) if args.parsed_dir.is_absolute() and ROOT in args.parsed_dir.parents else args.parsed_dir}`",
         f"- Parsed PCAP files: {len(rows)}",
         "",
-        "| case_id | zeek | tshark | session parser preference | warnings |",
-        "| --- | --- | --- | --- | --- |",
+        "| case_id | parser_source | zeek | tshark | session parser preference | errors | warnings |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         warnings = "; ".join(row.get("warnings", [])) or "none"
+        errors = "; ".join(str(row.get(key) or "") for key in ("zeek_error", "tshark_error") if row.get(key)) or "none"
         lines.append(
-            f"| {row.get('case_id')} | {row.get('zeek_success')} | {row.get('tshark_success')} | "
-            f"{row.get('session_parser_preference', 'zeek_conn_then_tshark_fallback')} | {warnings} |"
+            f"| {row.get('case_id')} | {row.get('parser_source')} | {row.get('zeek_success')} | {row.get('tshark_success')} | "
+            f"{row.get('session_parser_preference', 'zeek_conn_then_zeek_docker_then_tshark_fallback')} | {errors} | {warnings} |"
         )
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text("\n".join(lines) + "\n", encoding="utf-8")
