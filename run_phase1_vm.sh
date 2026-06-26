@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR=""
+GRANULARITY=""
 CONFIG="$ROOT/configs/phase1_vm.yaml"
 ARGS=("$@")
 
@@ -29,9 +30,32 @@ while [[ "$index" -lt "${#ARGS[@]}" ]]; do
       index=$((index + 1))
       CONFIG="${ARGS[$index]:?missing value for --config}"
       ;;
+    --granularity=*)
+      GRANULARITY="${ARGS[$index]#--granularity=}"
+      ;;
+    --granularity)
+      index=$((index + 1))
+      GRANULARITY="${ARGS[$index]:?missing value for --granularity}"
+      ;;
   esac
   index=$((index + 1))
 done
+
+if [[ -z "$GRANULARITY" ]]; then
+  if [[ -n "${PHASE1_GRANULARITY:-}" ]]; then
+    GRANULARITY="$PHASE1_GRANULARITY"
+  else
+    GRANULARITY="$(python3 - "$CONFIG" <<'PY'
+import pathlib
+import sys
+import yaml
+
+config = yaml.safe_load(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")) or {}
+print(config.get("granularity") or "pcap")
+PY
+)"
+  fi
+fi
 
 if [[ -z "$OUTPUT_DIR" ]]; then
   if [[ -n "${PHASE1_OUTPUT_DIR:-}" ]]; then
@@ -64,6 +88,7 @@ fi
 
 mkdir -p "$OUTPUT_DIR"
 printf 'Phase-1 VM runner starting. Output: %s\n' "$OUTPUT_DIR"
+printf 'Phase-1 output granularity: %s (pcap=one prediction per PCAP, session=per record).\n' "$GRANULARITY"
 printf 'Qwen thinking control: chat_template_kwargs.enable_thinking defaults to false; override with --enable-thinking or --disable-thinking.\n'
 printf 'Parser order: system zeek -> Docker Zeek image -> TShark fallback; Zeek success also runs safe TShark observable supplement unless disabled.\n'
 set +e

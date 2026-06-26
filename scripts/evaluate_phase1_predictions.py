@@ -19,10 +19,10 @@ TECHNIQUE_TO_STAGE = {
     "TN01_01": "TN01",
 }
 ALIASES = {
-    "pcap": ["pcap", "pcapid", "pcap文件", "pcap文件名", "文件名", "抓包文件", "pcapfilename", "pcapfile"],
+    "pcap": ["pcap", "pcapid", "pcap_id", "pcapname", "filename", "sample", "样本", "样本文件", "pcap文件", "pcap文件名", "文件名", "抓包文件", "pcapfilename", "pcapfile"],
     "number": ["编号", "number", "序号", "行号", "recordid", "record", "sessionid", "session", "flowid", "flow", "rowid", "row", "id"],
-    "stage": ["攻击阶段编号或正常流量编号", "stagecode", "attackstage", "stage", "阶段", "阶段编号", "label"],
-    "technique": ["攻击技术编号或正常流量编号", "techniqueguess", "techniquecode", "predictedcode", "攻击技术编号", "技术编号"],
+    "stage": ["攻击阶段编号或正常流量编号", "stagecode", "stage_code", "attackstage", "phase1", "stage", "阶段", "阶段编号", "label", "研判结果", "结果", "分类结果"],
+    "technique": ["攻击技术编号或正常流量编号", "techniqueguess", "technique_guess", "techniquecode", "technique_code", "predictedcode", "攻击技术编号", "技术编号", "技术"],
     "start": ["开始时间", "starttime", "start"],
     "end": ["结束时间", "endtime", "end"],
     "src_ip": ["源ip", "srcip", "sourceip"],
@@ -149,6 +149,9 @@ def load_techniques(path: Path | None) -> dict[str, str]:
         technique = clean(item.get("technique_guess") or item.get("technique_code")).upper()
         if key and technique:
             out[key] = technique
+        pcap = pcap_key(item.get("pcap_id") or item.get("pcap"))
+        if pcap and technique:
+            out.setdefault(pcap, technique)
     return out
 
 
@@ -168,6 +171,7 @@ def evaluate(predictions: Path, answer: Path, output_dir: Path, predictions_json
 
     pred_by_primary: dict[tuple[str, str], list[int]] = {}
     pred_by_number: dict[str, list[int]] = {}
+    pred_by_pcap: dict[str, list[int]] = {}
     pred_by_signature: dict[tuple[str, ...], list[int]] = {}
     for index, row in enumerate(pred_rows):
         pcap = pcap_key(value(row, pred_cols, "pcap"))
@@ -176,6 +180,8 @@ def evaluate(predictions: Path, answer: Path, output_dir: Path, predictions_json
             pred_by_primary.setdefault((pcap, number), []).append(index)
         if number:
             pred_by_number.setdefault(number, []).append(index)
+        if pcap:
+            pred_by_pcap.setdefault(pcap, []).append(index)
         sig = signature(row, pred_cols)
         if any(sig[1:]):
             pred_by_signature.setdefault(sig, []).append(index)
@@ -194,6 +200,8 @@ def evaluate(predictions: Path, answer: Path, output_dir: Path, predictions_json
         sig = signature(row, answer_cols)
         if any(sig[1:]):
             candidates.append(("observable_signature", pred_by_signature.get(sig, [])))
+        if pcap:
+            candidates.append(("pcap", pred_by_pcap.get(pcap, [])))
         chosen = None
         method = ""
         for candidate_method, indexes in candidates:
@@ -231,9 +239,10 @@ def evaluate(predictions: Path, answer: Path, output_dir: Path, predictions_json
         confusion[(expected, predicted)] += 1
         if expected != predicted:
             errors.append({"answer_row": answer_index + 2, "prediction_row": pred_index + 2, "pcap": pcap_key(value(pred_row, pred_cols, "pcap")), "number": number, "expected_stage": expected, "predicted_stage": predicted})
-        if expected_technique in TECHNIQUE_TO_STAGE and number in technique_predictions:
+        technique_key = number or pcap_key(value(pred_row, pred_cols, "pcap"))
+        if expected_technique in TECHNIQUE_TO_STAGE and technique_key in technique_predictions:
             technique_total += 1
-            technique_correct += technique_predictions[number] == expected_technique
+            technique_correct += technique_predictions[technique_key] == expected_technique
 
     correct = sum(confusion[(stage, stage)] for stage in STAGES)
     overall = correct / valid_pairs if valid_pairs else 0.0

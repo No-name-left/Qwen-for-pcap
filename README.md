@@ -7,7 +7,8 @@ Qwen-for-pcap is a PCAP/session-level network traffic classification pipeline fo
 ```text
 PCAP
 -> Zeek / tshark fallback
--> session cards and scan_group records
+-> session cards and scan/auth/C2 behavior records
+-> optional PCAP-level aggregation for one result per PCAP
 -> deterministic RAG query
 -> keyword RAG retrieval plus feature-triggered confusion-boundary cards
 -> Qwen3.5 or another OpenAI-compatible endpoint predicts technique_code only
@@ -112,6 +113,8 @@ export MODEL="qwen3.5"
 The runner sends Qwen `chat_template_kwargs.enable_thinking=false` by default. Use `--disable-extra-body` for online providers that reject this extension. The offline stage scripts never call an API; invoke `scripts/run_qwen_openai_compatible.py` explicitly with a technique prompt directory. `dry_run_mock` exercises result parsing and export without a network call.
 
 Targeted RAG is not unconditional prompt padding. Scan, authentication, Web/exploit, backdoor-direction, or outbound TLS/DNS/C2 features select only the relevant short boundary cards; ordinary top-ranked RAG follows within the runtime-profile budget.
+
+The Phase-1 VM runner defaults to `granularity: pcap` for one prediction per input PCAP, while `--granularity session` preserves the earlier per-session/group behavior. See `README_PHASE1_VM.md` for VM usage and output details.
 
 Do not run API batches blindly. Use the current small coverage set first, inspect the reports, then expand only if error analysis improves.
 

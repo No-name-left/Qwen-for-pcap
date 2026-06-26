@@ -6,6 +6,7 @@ api_key: EMPTY
 answer: null
 phase: phase1
 prompt_profile: observable_timing_boundary_rag_v4
+granularity: pcap
 dry_run: false
 resume: true
 limit: 0

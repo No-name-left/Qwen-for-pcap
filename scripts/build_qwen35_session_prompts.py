@@ -54,6 +54,9 @@ CORE_KEYS = [
     "c2_group_id", "connection_count",
     "bytes_pattern", "duration_pattern", "dns_query_repetition", "tls_sni_repetition",
     "callback_direction_hint", "member_session_count",
+    "pcap_name", "source_session_count", "source_record_count", "time_range",
+    "protocols_seen", "top_src_ips", "top_dst_ips", "top_dst_ports",
+    "services_seen", "parser_sources_seen",
 ]
 OBSERVABLE_KEYS = [
     "payload_visibility", "observable_payload_available", "encrypted_protocol",
@@ -68,6 +71,10 @@ OBSERVABLE_KEYS = [
     "exploit_indicators", "vuln_scan_indicators", "auth_indicators",
     "implant_indicators", "backdoor_access_indicators", "c2_indicators",
     "transferred_files_summary", "dns_summary", "tls_summary", "pcap_summary", "evidence_limits",
+    "payload_visibility_summary", "http_context_summary", "dns_context_summary",
+    "tls_context_summary", "ftp_context_summary", "scan_group_summary",
+    "auth_attempt_summary", "beacon_like_summary", "suspicious_indicator_counts",
+    "top_suspicious_sessions", "top_payload_evidence", "representative_benign_context",
 ]
 
 
@@ -183,6 +190,8 @@ def phase1_instruction_block() -> str:
     return (
         f"PROMPT_VERSION: {PROMPT_VERSION}\n"
         "Classify exactly one PCAP session or behavioral group for Phase-1 scoring. Predict stage_code first; technique_guess is optional best-effort detail and never overrides stage_code.\n"
+        "If record_type is pcap, judge the whole PCAP as one Phase-1 item: aggregate all sessions/groups, produce one stage_code for the entire PCAP, and use top_suspicious_sessions/top_payload_evidence only as representative evidence.\n"
+        "If record_type is session or a behavioral group, judge only that record with same-PCAP aggregates as context.\n"
         "Return exactly one JSON object.\n"
         "Do not output Markdown, a Thinking Process, or explanations before or after JSON.\n"
         "The first character must be \"{\" and the last character must be \"}\".\n"

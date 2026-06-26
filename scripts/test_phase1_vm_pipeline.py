@@ -10,10 +10,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from build_pcap_level_records import build_pcap_records
 from build_qwen35_session_prompts import STAGE_CODES, TECHNIQUE_TO_STAGE, build_phase1_prompt
+from build_rag_query import detect_confusion_groups, record_terms, targeted_rag_metadata
 from evaluate_phase1_predictions import evaluate
 from parse_public_pcaps import discover_pcaps, parse_case
-from run_phase1_pipeline import qwen_extra_body, run_api, safe_config_report, validate_prediction
+from run_phase1_pipeline import official_rows, qwen_extra_body, run_api, safe_config_report, validate_prediction
 
 
 class Phase1PromptTests(unittest.TestCase):
@@ -49,6 +51,28 @@ class Phase1PromptTests(unittest.TestCase):
             self.assertIn(stage, STAGE_CODES)
         self.assertNotIn("answer_key", prompt.lower())
 
+    def test_pcap_level_prompt_judges_whole_pcap_under_budget(self) -> None:
+        record = {
+            "record_id": "phase1_001::pcap", "pcap_id": "phase1_001", "pcap_name": "sample.pcap", "record_type": "pcap",
+            "source_session_count": 17, "source_record_count": 5,
+            "time_range": {"start_time": 1.0, "end_time": 9.5, "duration": 8.5},
+            "protocols_seen": ["tcp"], "top_dst_ports": [{"value": "80", "count": 12}],
+            "scan_group_summary": {"scan_like_record_count": 1, "max_unique_dst_ports": 12, "max_failed_conn_rate": 0.75},
+            "top_suspicious_sessions": [{"record_id": "phase1_001::scan_group::000001", "reasons": ["scan_high_fanout"], "score": 70}],
+            "top_payload_evidence": [{"source_record_id": "phase1_001::session::000002", "field": "suspicious_payload_snippets", "text": "cmd=whoami"}],
+        }
+        profile = {
+            "name": "test", "max_prompt_tokens": 1600, "max_prompt_chars": 4800,
+            "max_session_context_chars": 2200, "max_rag_chunks": 1, "max_rag_chars_per_chunk": 300,
+        }
+        prompt, meta = build_phase1_prompt(record, [], profile)
+        self.assertLessEqual(meta["estimated_prompt_tokens"], profile["max_prompt_tokens"])
+        self.assertIn("judge the whole PCAP", prompt)
+        self.assertIn("one stage_code for the entire PCAP", prompt)
+        self.assertIn("source_session_count", prompt)
+        self.assertIn("top_suspicious_sessions", prompt)
+        self.assertEqual(meta["task"], "phase1_stage_first")
+
     def test_prediction_validation_keeps_stage_primary(self) -> None:
         record = {"record_id": "r1", "pcap_id": "p1", "record_type": "session"}
         item = {"record_id": "r1", "stage_code": "TA11", "technique_guess": "TA01_01", "confidence": "high", "reason": "Repeated callback timing."}
@@ -72,6 +96,7 @@ class Phase1PromptTests(unittest.TestCase):
         self.assertEqual(report["thinking_control"], "chat_template_kwargs.enable_thinking")
         self.assertFalse(report["enable_thinking"])
         self.assertTrue(report["enable_tshark_observable_supplement"])
+        self.assertEqual(report["granularity"], "pcap")
 
     def test_qwen_extra_body_uses_chat_template_kwargs(self) -> None:
         payload = qwen_extra_body(False)
@@ -121,6 +146,73 @@ class Phase1PromptTests(unittest.TestCase):
         self.assertEqual(failures, [])
         self.assertEqual(captured[0]["extra_body"], {"chat_template_kwargs": {"enable_thinking": False}})
         self.assertNotIn("enable_thinking", captured[0]["extra_body"])
+
+    def test_pcap_level_records_aggregate_one_record_per_pcap(self) -> None:
+        cards = [
+            {"pcap_id": "phase1_001", "session_id": "s1", "record_type": "session", "start_time": 1.0, "end_time": 1.2, "src_ip": "10.0.0.1", "dst_ip": "10.0.0.2", "dst_port": 80, "proto": "tcp", "service": "http", "parser_source": "zeek_conn"},
+            {"pcap_id": "phase1_001", "session_id": "s2", "record_type": "session", "start_time": 2.0, "end_time": 2.2, "src_ip": "10.0.0.1", "dst_ip": "10.0.0.3", "dst_port": 8080, "proto": "tcp", "service": "http", "parser_source": "zeek_conn"},
+            {"pcap_id": "phase1_002", "session_id": "s3", "record_type": "session", "start_time": 3.0, "end_time": 3.2, "src_ip": "10.0.0.4", "dst_ip": "10.0.0.5", "dst_port": 443, "proto": "tcp", "service": "ssl", "parser_source": "tshark_fallback"},
+        ]
+        records = [
+            {
+                "pcap_id": "phase1_001", "record_id": "phase1_001::scan_group::000001", "record_type": "scan_group",
+                "start_time": 1.0, "end_time": 2.0, "src_ip": "10.0.0.1", "dst_ip": "10.0.0.2",
+                "unique_dst_ports": 12, "failed_conn_rate": 0.8, "candidate_hint": "TA43_01",
+            },
+            {
+                "pcap_id": "phase1_001", "record_id": "phase1_001::session::000002", "record_type": "session",
+                "start_time": 2.0, "end_time": 2.2, "src_ip": "10.0.0.1", "dst_ip": "10.0.0.3", "dst_port": 80,
+                "payload_visibility": "plaintext_http", "http_body_observed": True,
+                "suspicious_payload_snippets": ["cmd=whoami&password=secret"],
+                "exploit_indicators": {"command_injection": True, "matched_keywords": ["cmd_exe"]},
+            },
+            {"pcap_id": "phase1_002", "record_id": "phase1_002::session::000001", "record_type": "session", "start_time": 3.0, "end_time": 3.2, "src_ip": "10.0.0.4", "dst_ip": "10.0.0.5"},
+        ]
+        parse_summary = [{"case_id": "phase1_001", "pcap_path": "/inputs/a.pcap"}, {"case_id": "phase1_002", "pcap_path": "/inputs/b.pcap"}]
+        pcap_records = build_pcap_records(cards, records, parse_summary)
+        self.assertEqual([item["record_id"] for item in pcap_records], ["phase1_001::pcap", "phase1_002::pcap"])
+        first = pcap_records[0]
+        self.assertEqual(first["record_type"], "pcap")
+        self.assertEqual(first["pcap_name"], "a.pcap")
+        self.assertEqual(first["source_session_count"], 2)
+        self.assertEqual(first["source_record_count"], 2)
+        self.assertEqual(first["scan_group_summary"]["max_unique_dst_ports"], 12)
+        self.assertGreaterEqual(len(first["top_suspicious_sessions"]), 1)
+        self.assertIn("cmd=whoami", json.dumps(first["top_payload_evidence"], ensure_ascii=False))
+        self.assertNotIn("secret", json.dumps(first, ensure_ascii=False))
+
+    def test_pcap_record_rag_query_uses_aggregate_summaries(self) -> None:
+        record = {
+            "record_id": "phase1_001::pcap", "pcap_id": "phase1_001", "record_type": "pcap",
+            "scan_group_summary": {"scan_like_record_count": 1, "max_unique_dst_ports": 20},
+            "auth_attempt_summary": {"failed_login_count": 6, "max_attempt_count": 6},
+            "top_payload_evidence": [{"text": "cmd=whoami"}],
+            "exploit_indicators": {"command_injection": True},
+        }
+        terms, rules, low_signal = record_terms(record)
+        groups = detect_confusion_groups(record)
+        triggers, docs, _ = targeted_rag_metadata(record, groups)
+        self.assertFalse(low_signal)
+        self.assertIn("pcap-level classification", terms)
+        self.assertIn("pcap_scan_summary:TA43", rules)
+        self.assertIn("pcap_auth_summary:TA01_01", rules)
+        self.assertIn("pcap_payload_evidence", rules)
+        self.assertIn("pcap_scan_summary=positive", triggers)
+        self.assertTrue(docs)
+
+    def test_official_rows_preserve_core_columns_and_pcap_metadata(self) -> None:
+        rows = official_rows(
+            [{
+                "record_id": "phase1_001::pcap", "pcap_id": "phase1_001", "record_type": "pcap",
+                "stage_code": "TA43", "technique_guess": "TA43_01", "confidence": 0.9, "reason": "Port fanout across the PCAP.",
+            }],
+            {"phase1_001::pcap": "a.pcap"},
+        )
+        self.assertEqual(rows[0]["pcap"], "a.pcap")
+        self.assertEqual(rows[0]["编号"], "phase1_001::pcap")
+        self.assertEqual(rows[0]["pcap_id"], "phase1_001")
+        self.assertEqual(rows[0]["record_type"], "pcap")
+        self.assertEqual(rows[0]["technique_guess"], "TA43_01")
 
 
 class Phase1ParserSelectionTests(unittest.TestCase):
@@ -321,6 +413,31 @@ class Phase1EvaluationTests(unittest.TestCase):
             self.assertEqual(result["accuracy"], 1.0)
             self.assertTrue((root / "evaluation/eval_report.md").exists())
             self.assertTrue((root / "evaluation/confusion_matrix.csv").exists())
+
+    def test_pcap_level_answer_table_matches_by_unique_pcap(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            predictions = root / "predictions.csv"
+            answer = root / "answer.csv"
+            with predictions.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["pcap", "编号", "攻击阶段编号或正常流量编号", "technique_guess"])
+                writer.writeheader()
+                writer.writerows([
+                    {"pcap": "a.pcap", "编号": "phase1_001::pcap", "攻击阶段编号或正常流量编号": "TA43", "technique_guess": "TA43_01"},
+                    {"pcap": "b.pcap", "编号": "phase1_002::pcap", "攻击阶段编号或正常流量编号": "TN01", "technique_guess": "TN01_01"},
+                ])
+            with answer.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=["filename", "研判结果"])
+                writer.writeheader()
+                writer.writerows([
+                    {"filename": "a.pcap", "研判结果": "TA43"},
+                    {"filename": "b.pcap", "研判结果": "TN01"},
+                ])
+            result = evaluate(predictions, answer, root / "evaluation")
+            report = (root / "evaluation/eval_report.md").read_text(encoding="utf-8")
+            self.assertEqual(result["matched"], 2)
+            self.assertEqual(result["accuracy"], 1.0)
+            self.assertIn("'pcap': 2", report)
 
 
 if __name__ == "__main__":

@@ -171,6 +171,10 @@ def targeted_rag_metadata(record: dict[str, Any], groups: list[str]) -> tuple[li
     if port_fanout:
         triggers.append("port_or_target_fanout=positive")
         docs.extend([BOUNDARY_DOCS["ta43_01_vs_ta43_02"], TIMING_DOCS["scan"]])
+    scan_summary = record.get("scan_group_summary") or {}
+    if as_number(scan_summary.get("max_unique_dst_ports")) >= 8 or as_number(scan_summary.get("scan_like_record_count")) > 0:
+        triggers.append("pcap_scan_summary=positive")
+        docs.extend([BOUNDARY_DOCS["ta43_01_vs_ta43_02"], TIMING_DOCS["scan"]])
     vuln = record.get("vuln_scan_indicators") or {}
     if vuln.get("high_uri_fanout") or uri_fanout_high(record):
         triggers.append("uri_fanout=positive")
@@ -197,6 +201,10 @@ def targeted_rag_metadata(record: dict[str, Any], groups: list[str]) -> tuple[li
     if record.get("success_after_failures_hint") or auth.get("success_after_failures_hint"):
         triggers.append("success_after_failures=positive")
         docs.extend([BOUNDARY_DOCS["ta01_01_vs_tn01_01"], INDICATOR_DOCS["auth_indicators"]])
+    auth_summary = record.get("auth_attempt_summary") or {}
+    if as_number(auth_summary.get("failed_login_count")) > 0 or as_number(auth_summary.get("max_attempt_count")) >= 5:
+        triggers.append("pcap_auth_summary=positive")
+        docs.extend([BOUNDARY_DOCS["ta01_01_vs_tn01_01"], INDICATOR_DOCS["auth_indicators"], TIMING_DOCS["auth"]])
     callback_timing = record.get("interval_summary") and (
         record.get("record_type") == "c2_callback_group"
         or as_number(record.get("beacon_score")) >= 0.5
@@ -221,6 +229,10 @@ def targeted_rag_metadata(record: dict[str, Any], groups: list[str]) -> tuple[li
     ):
         triggers.append("encrypted_timing_metadata=positive")
         docs.extend(["observable_encrypted_visibility_limits", TIMING_DOCS["callback"]])
+    beacon_summary = record.get("beacon_like_summary") or {}
+    if as_number(beacon_summary.get("max_beacon_score")) >= 0.5 or as_number(beacon_summary.get("fixed_endpoint_record_count")) > 0:
+        triggers.append("pcap_beacon_summary=positive")
+        docs.extend([BOUNDARY_DOCS["ta11_02_vs_tn01_01"], TIMING_DOCS["callback"]])
     if benign_periodic_active(record):
         triggers.append("benign_periodic_hints=positive")
         docs.extend([TIMING_DOCS["benign_periodic"], TIMING_DOCS["callback"]])
@@ -238,7 +250,7 @@ def targeted_rag_metadata(record: dict[str, Any], groups: list[str]) -> tuple[li
     if (
         field_indicator_active(record, "exploit_indicators")
         and (field_indicator_active(record, "implant_indicators") or field_indicator_active(record, "backdoor_access_indicators"))
-    ) or any(term in chain_blob for term in ("multipart", "webshell", "cmd=", "command=", "exec=", "upload", "filename")):
+    ) or any(term in chain_blob for term in ("multipart", "webshell", "cmd=", "command=", "exec=", "upload", "filename")) or record.get("top_payload_evidence"):
         triggers.append("exploit_upload_access_boundary=positive")
         docs.extend([
             TIMING_DOCS["sequence"],
@@ -326,7 +338,9 @@ def detect_confusion_groups(record: dict[str, Any]) -> list[str]:
 
 
 def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
-    terms: list[str] = ["official competition code", "session-level classification", str(record.get("record_type", ""))]
+    record_type = str(record.get("record_type", "session") or "session")
+    level = "pcap-level classification" if record_type == "pcap" else "session-level classification"
+    terms: list[str] = ["official competition code", level, record_type]
     rules: list[str] = []
     low_signal = False
 
@@ -348,6 +362,32 @@ def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
     add_term(terms, record.get("payload_visibility"))
     add_term(terms, record.get("suspicious_payload_snippets"))
     add_term(terms, record.get("suspicious_uri_patterns"))
+    if record_type == "pcap":
+        terms.extend(["whole PCAP", "aggregate sessions", "one stage per pcap", "representative suspicious sessions"])
+        for field in (
+            "payload_visibility_summary", "http_context_summary", "dns_context_summary",
+            "tls_context_summary", "ftp_context_summary", "top_suspicious_sessions",
+            "top_payload_evidence", "suspicious_indicator_counts",
+        ):
+            add_term(terms, record.get(field))
+        scan_summary = record.get("scan_group_summary") or {}
+        auth_summary = record.get("auth_attempt_summary") or {}
+        beacon_summary = record.get("beacon_like_summary") or {}
+        add_term(terms, scan_summary)
+        add_term(terms, auth_summary)
+        add_term(terms, beacon_summary)
+        if as_number(scan_summary.get("max_unique_dst_ports")) >= 8 or as_number(scan_summary.get("scan_like_record_count")) > 0:
+            terms.extend(["PCAP scan summary", "port fanout across PCAP", "TA43"])
+            rules.append("pcap_scan_summary:TA43")
+        if as_number(auth_summary.get("failed_login_count")) > 0 or as_number(auth_summary.get("max_attempt_count")) >= 5:
+            terms.extend(["PCAP authentication attempts", "failed login count across PCAP", "TA01_01"])
+            rules.append("pcap_auth_summary:TA01_01")
+        if as_number(beacon_summary.get("max_beacon_score")) >= 0.5 or as_number(beacon_summary.get("fixed_endpoint_record_count")) > 0:
+            terms.extend(["PCAP beacon summary", "callback timing across PCAP", "TA11_02"])
+            rules.append("pcap_beacon_summary:TA11_02")
+        if record.get("top_payload_evidence"):
+            terms.extend(["PCAP payload evidence", "exploit upload backdoor boundary", "TA01_02 TA03_01 TA11_01"])
+            rules.append("pcap_payload_evidence")
     for field in (
         "time_span", "inter_arrival_summary", "inter_attempt_intervals", "interval_summary",
         "attempt_rate", "probe_rate", "burstiness_score", "periodicity_score", "regularity_score",

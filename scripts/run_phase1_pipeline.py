@@ -30,7 +30,10 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "configs/phase1_vm.yaml"
 STAGE_FIELD = "攻击阶段编号或正常流量编号"
 REASON_FIELD = "研判理由（不计入评分）"
-CSV_FIELDS = ["pcap", "编号", "开始时间", "结束时间", "源IP", "源端口", "目的IP", "目的端口", STAGE_FIELD, REASON_FIELD]
+CSV_FIELDS = [
+    "pcap", "编号", "开始时间", "结束时间", "源IP", "源端口", "目的IP", "目的端口",
+    STAGE_FIELD, REASON_FIELD, "pcap_id", "pcap_name", "record_type", "technique_guess", "confidence",
+]
 PCAP_SUFFIXES = {".pcap", ".pcapng", ".cap"}
 
 
@@ -124,6 +127,7 @@ def effective_config(args: argparse.Namespace) -> dict[str, Any]:
         "model": config_value(data, args, "model", ["LLM_MODEL_NAME", "MODEL", "OPENAI_MODEL"]),
         "api_key": config_value(data, args, "api_key", ["LLM_API_KEY", "API_KEY", "OPENAI_API_KEY"]),
         "answer": config_value(data, args, "answer", ["PHASE1_ANSWER"], Path),
+        "granularity": config_value(data, args, "granularity", ["PHASE1_GRANULARITY"]),
         "dry_run": config_value(data, args, "dry_run", ["PHASE1_DRY_RUN"], as_bool),
         "resume": config_value(data, args, "resume", ["PHASE1_RESUME"], as_bool),
         "limit": config_value(data, args, "limit", ["PHASE1_LIMIT"], int),
@@ -147,6 +151,9 @@ def effective_config(args: argparse.Namespace) -> dict[str, Any]:
         values["allow_tshark_fallback"] = True
     if values["enable_tshark_observable_supplement"] is None:
         values["enable_tshark_observable_supplement"] = True
+    if values["granularity"] is None:
+        values["granularity"] = "pcap"
+    values["granularity"] = str(values["granularity"]).strip().lower()
     values["input_dir"] = Path(values["input_dir"]).expanduser().resolve()
     values["output_dir"] = Path(values["output_dir"]).expanduser().resolve()
     values["answer"] = Path(values["answer"]).expanduser().resolve() if values.get("answer") else None
@@ -164,6 +171,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model")
     parser.add_argument("--api-key")
     parser.add_argument("--answer", type=Path)
+    parser.add_argument("--granularity", choices=["pcap", "session"], help="Final output granularity. pcap builds one prompt/prediction per PCAP; session preserves existing per-record behavior.")
     parser.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--limit", type=int)
@@ -186,6 +194,8 @@ def parse_args() -> argparse.Namespace:
 def validate_config(config: dict[str, Any]) -> list[Path]:
     if config["limit"] < 0 or config["rag_top_k"] < 1 or config["max_prompt_tokens"] < 1000:
         raise ValueError("limit must be >=0, rag_top_k >=1, and max_prompt_tokens >=1000")
+    if config["granularity"] not in {"pcap", "session"}:
+        raise ValueError("granularity must be either 'pcap' or 'session'")
     input_dir = config["input_dir"]
     if not input_dir.is_dir():
         raise FileNotFoundError(f"input directory does not exist: {input_dir}")
@@ -217,8 +227,10 @@ def step_paths(output: Path) -> dict[str, Path]:
         "auth_groups": cards / "auth_attempt_groups.json",
         "c2_groups": cards / "c2_callback_groups.json",
         "records": cards / "classification_records.json",
+        "pcap_records": cards / "pcap_level_records.json",
         "selected": cards / "selected_records.json",
         "records_report": cards / "classification_records_report.md",
+        "pcap_records_report": cards / "pcap_level_records_report.md",
         "queries": rag / "queries.jsonl",
         "query_report": rag / "query_report.md",
         "retrieval": rag / "retrieval.json",
@@ -251,7 +263,7 @@ def create_parse_errors(summary: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return errors
 
 
-def prepare_evidence(config: dict[str, Any], paths: dict[str, Path], pcaps: list[Path]) -> tuple[list[dict[str, Any]], dict[str, str], dict[str, str]]:
+def prepare_evidence(config: dict[str, Any], paths: dict[str, Path], pcaps: list[Path]) -> tuple[list[dict[str, Any]], dict[str, str], dict[str, str], dict[str, int]]:
     python = sys.executable
     parse_summary = load_json(paths["parse_summary"], []) if config["resume"] else []
     current_manifest = [{"name": path.name, "size": path.stat().st_size, "mtime_ns": path.stat().st_mtime_ns} for path in pcaps]
@@ -292,7 +304,8 @@ def prepare_evidence(config: dict[str, Any], paths: dict[str, Path], pcaps: list
         print("[SKIP] session cards: resume artifact is valid", flush=True)
     else:
         run_command("build session cards", [python, str(ROOT / "scripts/build_session_cards.py"), "--parsed-dir", str(paths["parsed"]), "--output", str(paths["cards"]), "--llm-output", str(paths["llm_cards"]), "--report", str(paths["cards_report"])])
-    if config["resume"] and cards_reused and path_has_json_list(paths["records"]):
+    records_reused = bool(config["resume"] and cards_reused and path_has_json_list(paths["records"]))
+    if records_reused:
         print("[SKIP] classification records: resume artifact is valid", flush=True)
     else:
         run_command("build behavioral classification records", [
@@ -301,20 +314,47 @@ def prepare_evidence(config: dict[str, Any], paths: dict[str, Path], pcaps: list
             "--c2-groups-output", str(paths["c2_groups"]), "--records-output", str(paths["records"]),
             "--report", str(paths["records_report"]), "--emit-auth-groups", "--emit-c2-groups",
         ])
+    session_cards = load_json(paths["cards"], [])
     records = load_json(paths["records"], [])
     if not records:
         raise RuntimeError("no classification records were built from the input PCAPs")
-    selected = records[: config["limit"]] if config["limit"] else records
+    pcap_records: list[dict[str, Any]] = []
+    if config["granularity"] == "pcap":
+        pcap_reused = bool(config["resume"] and parse_reused and records_reused and path_has_json_list(paths["pcap_records"]))
+        if pcap_reused:
+            print("[SKIP] PCAP-level records: resume artifact is valid", flush=True)
+        else:
+            run_command("build PCAP-level classification records", [
+                python, str(ROOT / "scripts/build_pcap_level_records.py"),
+                "--session-cards", str(paths["cards"]),
+                "--classification-records", str(paths["records"]),
+                "--parse-summary", str(paths["parse_summary"]),
+                "--output", str(paths["pcap_records"]),
+                "--report", str(paths["pcap_records_report"]),
+            ])
+        pcap_records = load_json(paths["pcap_records"], [])
+        if not pcap_records:
+            raise RuntimeError("no PCAP-level records were built from the input PCAPs")
+        final_records = pcap_records
+    else:
+        final_records = records
+    selected = final_records[: config["limit"]] if config["limit"] else final_records
     write_json(paths["selected"], selected)
     record_to_pcap = {str(record.get("record_id")): case_to_pcap.get(str(record.get("pcap_id")), str(record.get("pcap_id") or "")) for record in selected}
-    return selected, case_to_pcap, record_to_pcap
+    evidence_stats = {
+        "source_session_cards": len(session_cards),
+        "source_classification_records": len(records),
+        "pcap_level_records": len(pcap_records),
+        "selected_records": len(selected),
+    }
+    return selected, case_to_pcap, record_to_pcap, evidence_stats
 
 
 def prepare_rag(config: dict[str, Any], paths: dict[str, Path], expected_count: int) -> list[dict[str, Any]]:
     python = sys.executable
     cached = load_json(paths["retrieval"], []) if config["resume"] else []
     expected_ids = [str(item.get("record_id")) for item in load_json(paths["selected"], [])]
-    expected_config = {"rag_top_k": config["rag_top_k"], "record_ids": expected_ids}
+    expected_config = {"rag_top_k": config["rag_top_k"], "granularity": config["granularity"], "record_ids": expected_ids}
     cached_config = load_json(paths["rag_config"], {}) if config["resume"] else {}
     if len(cached) == expected_count and [str(item.get("record_id")) for item in cached] == expected_ids and paths["queries"].exists() and cached_config == expected_config:
         print(f"[SKIP] RAG: resume found {expected_count} retrieval records", flush=True)
@@ -514,11 +554,16 @@ def run_api(config: dict[str, Any], paths: dict[str, Path], records: list[dict[s
 
 def official_rows(results: list[dict[str, Any]], record_to_pcap: dict[str, str]) -> list[dict[str, Any]]:
     return [{
-        "pcap": record_to_pcap.get(item["record_id"], item.get("pcap_id") or ""), "编号": item["record_id"],
+        "pcap": record_to_pcap.get(item["record_id"], item.get("pcap_id") or ""),
+        "pcap_id": item.get("pcap_id") or "",
+        "pcap_name": record_to_pcap.get(item["record_id"], item.get("pcap_id") or ""),
+        "record_type": item.get("record_type") or "",
+        "编号": item["record_id"],
         "开始时间": item.get("start_time"), "结束时间": item.get("end_time"),
         "源IP": item.get("src_ip"), "源端口": item.get("src_port"),
         "目的IP": item.get("dst_ip"), "目的端口": item.get("dst_port"),
-        STAGE_FIELD: item["stage_code"], REASON_FIELD: item.get("reason") or "",
+        STAGE_FIELD: item["stage_code"], "technique_guess": item.get("technique_guess") or "",
+        "confidence": item.get("confidence"), REASON_FIELD: item.get("reason") or "",
     } for item in results]
 
 
@@ -531,7 +576,8 @@ def safe_config_report(config: dict[str, Any]) -> dict[str, Any]:
     return {
         "input_dir": str(config["input_dir"]), "output_dir": str(config["output_dir"]),
         "base_url": safe_url, "model": config["model"], "api_key_configured": bool(config.get("api_key")),
-        "answer_configured": bool(config.get("answer")), "dry_run": config["dry_run"], "resume": config["resume"],
+        "answer_configured": bool(config.get("answer")), "granularity": config.get("granularity", "pcap"),
+        "dry_run": config["dry_run"], "resume": config["resume"],
         "limit": config["limit"], "rag_top_k": config["rag_top_k"], "max_prompt_tokens": config["max_prompt_tokens"],
         "request_timeout": config["request_timeout"], "max_retries": config["max_retries"],
         "enable_thinking": config["enable_thinking"], "thinking_control": "chat_template_kwargs.enable_thinking",
@@ -547,7 +593,12 @@ def write_summary(config: dict[str, Any], paths: dict[str, Path], stats: dict[st
         "# Phase-1 VM Run Summary", "",
         f"- Status: `{stats['status']}`", f"- Finished at: `{utc_now()}`",
         f"- Dry-run: `{str(config['dry_run']).lower()}`", f"- Resume: `{str(config['resume']).lower()}`",
-        f"- Input PCAPs: {stats.get('pcaps', 0)}", f"- Classification records selected: {stats.get('records', 0)}",
+        f"- Granularity: `{config.get('granularity', 'pcap')}`",
+        f"- Input PCAPs: {stats.get('pcaps', 0)}",
+        f"- Source session cards: {stats.get('source_session_cards', 0)}",
+        f"- Source classification records: {stats.get('source_classification_records', 0)}",
+        f"- PCAP-level records: {stats.get('pcap_level_records', 0)}",
+        f"- Classification records selected for prompting: {stats.get('records', 0)}",
         f"- Prompts built: {stats.get('prompts', 0)}", f"- Predictions: {stats.get('predictions', 0)}",
         f"- Failed records: {stats.get('failures', 0)}", f"- API requests attempted: {stats.get('api_calls', 0)}",
         f"- Prompt profile: `{PROMPT_VERSION}`", f"- Maximum estimated prompt tokens: {stats.get('max_prompt_tokens', 0)} / {config['max_prompt_tokens']}",
@@ -581,12 +632,17 @@ def main() -> int:
     output.mkdir(parents=True, exist_ok=True)
     paths = step_paths(output)
     write_json(output / "config_effective.json", safe_config_report(config))
-    state = {"started_at": utc_now(), "status": "running", "dry_run": config["dry_run"], "steps": {}}
+    state = {"started_at": utc_now(), "status": "running", "dry_run": config["dry_run"], "granularity": config["granularity"], "steps": {}}
     write_json(output / "run_state.json", state)
-    stats: dict[str, Any] = {"pcaps": len(pcaps), "records": 0, "prompts": 0, "predictions": 0, "failures": 0, "api_calls": 0}
+    stats: dict[str, Any] = {
+        "pcaps": len(pcaps), "records": 0, "source_session_cards": 0,
+        "source_classification_records": 0, "pcap_level_records": 0,
+        "prompts": 0, "predictions": 0, "failures": 0, "api_calls": 0,
+    }
     try:
-        records, _, record_to_pcap = prepare_evidence(config, paths, pcaps)
+        records, _, record_to_pcap, evidence_stats = prepare_evidence(config, paths, pcaps)
         stats["records"] = len(records)
+        stats.update(evidence_stats)
         state["steps"]["evidence"] = "complete"
         write_json(output / "run_state.json", state)
         retrieval = prepare_rag(config, paths, len(records))
