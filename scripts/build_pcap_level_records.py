@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
@@ -27,6 +28,18 @@ PAYLOAD_FIELDS = [
     "suspicious_uri_patterns",
     "http_upload_hints",
 ]
+TECHNIQUE_CODES = ["TA43_01", "TA43_02", "TA01_01", "TA01_02", "TA03_01", "TA11_01", "TA11_02", "TN01_01"]
+AUTH_SERVICE_PORTS = {21, 22, 23, 25, 110, 143, 389, 445, 1433, 1521, 3306, 3389, 5432, 5900, 6379, 9200}
+FAILED_STATES = {"S0", "REJ", "RSTOS0", "RSTRH", "SH", "SHR"}
+SENSITIVE_PATH_RE = re.compile(
+    r"(?i)(?:/app_data/|/db\.mdb\b|\.mdb\b|/\.env\b|/config(?:\.php)?\b|/backup\b|/database\b|/db/|/admin\b|/phpinfo\.php\b|/\.git/|/web-inf/|/server-status\b)"
+)
+MINER_RE = re.compile(r"(?i)(?:/miner/ping\b|\bminer\b|\bhashrate\b|\bethminer\b|\bmining\b|\bworker\b|\brig\b|heartbeat[-_ ]?like ping)")
+FILE_PLACEMENT_RE = re.compile(
+    r"(?i)(?:multipart/form-data|\bfilename\s*=|/(?:upload|uploads|plugin/install|admin/upload)\b|"
+    r"\.(?:php|jsp|jspx|asp|aspx|war|exe|dll|elf|sh|py)(?:$|[?&#/])|"
+    r"(?:/var/www|/wwwroot|/webapps|htdocs|server-side path|dropped file|write file))"
+)
 
 
 def as_float(value: Any) -> float | None:
@@ -157,6 +170,152 @@ def value_list(rows: Iterable[dict[str, Any]], field: str, limit: int = 12) -> l
 
 def value_count(rows: Iterable[dict[str, Any]], field: str) -> int:
     return sum(1 for row in rows if non_empty(row.get(field)))
+
+
+def evidence_blob(*values: Any) -> str:
+    useful = [value for value in values if non_empty(value)]
+    return json.dumps(useful, ensure_ascii=False, sort_keys=True).lower() if useful else ""
+
+
+def port_value(value: Any) -> int | None:
+    try:
+        return int(float(str(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def top_port_count(record: dict[str, Any], ports: set[int]) -> int:
+    total = 0
+    for item in record.get("top_dst_ports") or []:
+        if isinstance(item, dict) and port_value(item.get("value")) in ports:
+            total += int(as_count(item.get("count")))
+    return total
+
+
+def repeated_auth_service_active(record: dict[str, Any], rows: list[dict[str, Any]]) -> bool:
+    auth_rows = [row for row in rows if port_value(row.get("dst_port")) in AUTH_SERVICE_PORTS]
+    auth_port_count = max(len(auth_rows), top_port_count(record, AUTH_SERVICE_PORTS))
+    if auth_port_count < 10:
+        return False
+    max_same_service = max([as_count(row.get("same_src_same_dst_port_count")) for row in rows] + [0.0])
+    short_or_failed = sum(
+        1 for row in auth_rows
+        if row.get("conn_state") in FAILED_STATES
+        or as_count(row.get("resp_pkts")) == 0
+        or as_count(row.get("resp_bytes")) == 0
+    )
+    return auth_port_count >= 20 or max_same_service >= 10 or short_or_failed >= 5
+
+
+def strong_file_placement_active(record: dict[str, Any], blob: str) -> bool:
+    return (
+        bool(record.get("http_multipart_present"))
+        or non_empty(record.get("http_upload_hints"))
+        or non_empty(record.get("transferred_files_summary"))
+        or bool(FILE_PLACEMENT_RE.search(blob))
+    )
+
+
+def score_pcap_candidates(record: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    scores = {code: 0.0 for code in TECHNIQUE_CODES}
+    scores["TN01_01"] = 0.5
+    rule_evidence: list[str] = []
+
+    def add(code: str, amount: float, reason: str) -> None:
+        scores[code] += amount
+        if reason not in rule_evidence:
+            rule_evidence.append(reason)
+
+    def subtract(code: str, amount: float, reason: str) -> None:
+        scores[code] -= amount
+        if reason not in rule_evidence:
+            rule_evidence.append(reason)
+
+    counts = record.get("suspicious_indicator_counts") or {}
+    payload_summary = record.get("payload_visibility_summary") or {}
+    scan_summary = record.get("scan_group_summary") or {}
+    auth_summary = record.get("auth_attempt_summary") or {}
+    beacon_summary = record.get("beacon_like_summary") or {}
+    blob = evidence_blob(
+        record.get("http_context_summary"), record.get("http_uris_sample"), record.get("http_hosts"),
+        record.get("http_user_agents"), record.get("top_payload_evidence"), record.get("suspicious_payload_snippets"),
+        record.get("suspicious_http_parameters"), record.get("suspicious_uri_patterns"),
+        record.get("http_upload_hints"), record.get("transferred_files_summary"), rows,
+    )
+
+    attack_signal = False
+    if as_count(scan_summary.get("max_unique_dst_ports")) >= 8 or as_count(scan_summary.get("scan_like_record_count")) > 0:
+        add("TA43_01", 3.5, "scan_group_summary shows port/target fanout")
+        attack_signal = True
+        if as_count(scan_summary.get("max_failed_conn_rate")) >= 0.4:
+            add("TA43_01", 0.8, "scan_group_summary high failed connection rate")
+    if as_count(counts.get("vuln_scan_indicators")) > 0:
+        add("TA43_02", 3.0, "vuln_scan_indicators > 0")
+        attack_signal = True
+    if SENSITIVE_PATH_RE.search(blob):
+        add("TA43_02", 4.5, "sensitive-path vulnerability probe observed")
+        subtract("TN01_01", 1.0, "TN01_01 penalty: sensitive-path probe is not ordinary business traffic")
+        attack_signal = True
+
+    exploit_count = as_count(counts.get("exploit_indicators"))
+    suspicious_payload_count = as_count(payload_summary.get("suspicious_payload_record_count")) + len(record.get("top_payload_evidence") or [])
+    if exploit_count > 0:
+        add("TA01_02", 3.2, "exploit_indicators > 0")
+        attack_signal = True
+    if exploit_count > 0 and suspicious_payload_count > 0:
+        add("TA01_02", 3.2, "exploit_indicators > 0 and suspicious_payload_record_count > 0")
+        subtract("TN01_01", 2.0, "TN01_01 penalty: explicit exploit/payload indicators present")
+        attack_signal = True
+
+    if as_count(counts.get("auth_indicators")) > 0 or as_count(auth_summary.get("failed_login_count")) > 0 or as_count(auth_summary.get("max_attempt_count")) >= 5:
+        add("TA01_01", 3.2, "auth brute-force indicators or repeated failures observed")
+        attack_signal = True
+    if repeated_auth_service_active(record, rows):
+        add("TA01_01", 5.0, "repeated short connections to authentication service port")
+        subtract("TA11_02", 2.5, "TA11_02 penalty: authentication service repetition fits brute force better than C2")
+        attack_signal = True
+
+    implant_count = as_count(counts.get("implant_indicators"))
+    file_placement = strong_file_placement_active(record, blob)
+    if implant_count > 0 and file_placement:
+        add("TA03_01", 4.6, "implant/upload indicators with clear file placement evidence")
+        attack_signal = True
+    elif implant_count > 0:
+        add("TA03_01", 1.0, "implant_indicators present but file placement evidence is weak")
+        if exploit_count > 0 or suspicious_payload_count > 0:
+            add("TA01_02", 2.0, "generic exploit POST/payload without clear file placement favors TA01_02 over TA03_01")
+        attack_signal = True
+
+    if as_count(counts.get("backdoor_access_indicators")) > 0:
+        add("TA11_01", 3.8, "backdoor_access_indicators > 0")
+        attack_signal = True
+
+    c2_count = as_count(counts.get("c2_indicators"))
+    beacon_count = as_count(beacon_summary.get("beacon_like_record_count"))
+    if c2_count > 0:
+        add("TA11_02", 2.6, "c2_indicators > 0")
+        attack_signal = True
+    if c2_count > 0 and beacon_count > 0:
+        add("TA11_02", 4.0, "c2_indicators > 0 and beacon_like_record_count > 0")
+        subtract("TN01_01", 2.0, "TN01_01 penalty: beacon/C2 indicators present")
+        attack_signal = True
+    if as_count(payload_summary.get("encrypted_records")) > 0 and beacon_count > 0:
+        add("TA11_02", 1.2, "encrypted endpoint-fixed or beacon-like repeated sessions")
+    if MINER_RE.search(blob):
+        add("TA11_02", 5.0, "miner/hashrate/ethminer heartbeat-like callback observed")
+        subtract("TN01_01", 1.5, "TN01_01 penalty: miner heartbeat is not ordinary business traffic")
+        attack_signal = True
+
+    if not attack_signal:
+        add("TN01_01", 2.0, "no strong attack indicator in PCAP-level aggregate")
+    for code in scores:
+        scores[code] = round(max(0.0, scores[code]), 3)
+    primary = sorted(scores.items(), key=lambda item: (-item[1], TECHNIQUE_CODES.index(item[0])))[0][0]
+    return {
+        "candidate_technique_scores": scores,
+        "primary_rule_candidate": primary,
+        "rule_evidence": rule_evidence[:12],
+    }
 
 
 def row_identity(row: dict[str, Any]) -> dict[str, Any]:
@@ -500,6 +659,7 @@ def build_pcap_record(
         record["dns_summary"] = dns
     if tls:
         record["tls_summary"] = tls
+    record.update(score_pcap_candidates(record, rows))
     return record
 
 

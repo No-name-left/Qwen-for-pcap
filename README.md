@@ -8,7 +8,7 @@ Qwen-for-pcap is a PCAP/session-level network traffic classification pipeline fo
 PCAP
 -> Zeek / tshark fallback
 -> session cards and scan/auth/C2 behavior records
--> optional PCAP-level aggregation for one result per PCAP
+-> optional PCAP-level aggregation with deterministic candidate scores for one result per PCAP
 -> deterministic RAG query
 -> keyword RAG retrieval plus feature-triggered confusion-boundary cards
 -> Qwen3.5 or another OpenAI-compatible endpoint predicts technique_code only
@@ -114,7 +114,7 @@ The runner sends Qwen `chat_template_kwargs.enable_thinking=false` by default. U
 
 Targeted RAG is not unconditional prompt padding. Scan, authentication, Web/exploit, backdoor-direction, or outbound TLS/DNS/C2 features select only the relevant short boundary cards; ordinary top-ranked RAG follows within the runtime-profile budget.
 
-The Phase-1 VM runner defaults to `granularity: pcap` for one prediction per input PCAP, while `--granularity session` preserves the earlier per-session/group behavior. See `README_PHASE1_VM.md` for VM usage and output details.
+The Phase-1 VM runner defaults to `granularity: pcap`, the recommended mode for current Phase-1 samples. It still builds session/group evidence, then aggregates it into one PCAP-level record with `candidate_technique_scores`, `primary_rule_candidate`, and `rule_evidence`; `--granularity session` preserves the earlier per-session/group behavior. The evaluator supports the official sample answer column `攻击技术名称或正常流量`. See `README_PHASE1_VM.md` for VM usage and output details.
 
 Do not run API batches blindly. Use the current small coverage set first, inspect the reports, then expand only if error analysis improves.
 

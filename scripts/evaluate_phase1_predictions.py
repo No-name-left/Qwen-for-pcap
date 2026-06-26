@@ -18,11 +18,22 @@ TECHNIQUE_TO_STAGE = {
     "TA11_01": "TA11", "TA11_02": "TA11",
     "TN01_01": "TN01",
 }
+CHINESE_TECHNIQUE_TO_CODE = {
+    "正常流量": "TN01_01",
+    "正常": "TN01_01",
+    "端口扫描": "TA43_01",
+    "漏洞扫描": "TA43_02",
+    "密码爆破": "TA01_01",
+    "漏洞利用": "TA01_02",
+    "植入后门": "TA03_01",
+    "访问后门": "TA11_01",
+    "木马回连": "TA11_02",
+}
 ALIASES = {
-    "pcap": ["pcap", "pcapid", "pcap_id", "pcapname", "filename", "sample", "样本", "样本文件", "pcap文件", "pcap文件名", "文件名", "抓包文件", "pcapfilename", "pcapfile"],
-    "number": ["编号", "number", "序号", "行号", "recordid", "record", "sessionid", "session", "flowid", "flow", "rowid", "row", "id"],
-    "stage": ["攻击阶段编号或正常流量编号", "stagecode", "stage_code", "attackstage", "phase1", "stage", "阶段", "阶段编号", "label", "研判结果", "结果", "分类结果"],
-    "technique": ["攻击技术编号或正常流量编号", "techniqueguess", "technique_guess", "techniquecode", "technique_code", "predictedcode", "攻击技术编号", "技术编号", "技术"],
+    "pcap": ["pcap", "pcap_name", "pcapname", "filename", "sample", "样本", "样本文件", "pcap文件", "pcap文件名", "文件名", "抓包文件", "pcapfilename", "pcapfile", "pcapid", "pcap_id"],
+    "number": ["编号", "record_id", "number", "序号", "行号", "recordid", "record", "sessionid", "session", "flowid", "flow", "rowid", "row", "id"],
+    "stage": ["攻击阶段编号或正常流量编号", "stagecode", "stage_code", "attackstage", "phase1", "stage", "阶段", "阶段编号", "label", "研判结果", "研判结论", "结果", "结论", "标签", "类别", "分类结果"],
+    "technique": ["攻击技术名称或正常流量", "攻击技术编号或正常流量编号", "techniqueguess", "technique_guess", "techniquecode", "technique_code", "predictedcode", "攻击技术编号", "技术编号", "技术", "类别", "标签"],
     "start": ["开始时间", "starttime", "start"],
     "end": ["结束时间", "endtime", "end"],
     "src_ip": ["源ip", "srcip", "sourceip"],
@@ -99,6 +110,9 @@ def normalize_stage(value: Any) -> str:
         return text
     if text in TECHNIQUE_TO_STAGE:
         return TECHNIQUE_TO_STAGE[text]
+    technique = normalize_technique(value)
+    if technique:
+        return TECHNIQUE_TO_STAGE[technique]
     compact = normalized_header(value)
     words = {
         "reconnaissance": "TA43", "侦察": "TA43", "扫描": "TA43",
@@ -108,6 +122,16 @@ def normalize_stage(value: Any) -> str:
         "normal": "TN01", "正常": "TN01", "正常流量": "TN01",
     }
     return words.get(compact, "")
+
+
+def normalize_technique(value: Any) -> str:
+    text = clean(value)
+    upper = text.upper()
+    if upper in TECHNIQUE_TO_STAGE:
+        return upper
+    compact = normalized_header(text)
+    by_compact = {normalized_header(key): code for key, code in CHINESE_TECHNIQUE_TO_CODE.items()}
+    return by_compact.get(compact, "")
 
 
 def value(row: dict[str, Any], columns: dict[str, str], logical: str) -> str:
@@ -164,10 +188,10 @@ def evaluate(predictions: Path, answer: Path, output_dir: Path, predictions_json
         raise ValueError("answer table has no data rows")
     pred_cols = column_map(pred_rows[0].keys())
     answer_cols = column_map(answer_rows[0].keys())
-    if "stage" not in pred_cols:
-        raise ValueError("prediction table has no recognized stage column; accepted examples: stage_code, stage, 阶段, 攻击阶段编号或正常流量编号")
+    if "stage" not in pred_cols and "technique" not in pred_cols:
+        raise ValueError("prediction table has no recognized stage/technique column; accepted examples: stage_code, technique_guess, stage, 阶段, 攻击阶段编号或正常流量编号")
     if "stage" not in answer_cols and "technique" not in answer_cols:
-        raise ValueError("answer table has no recognized label column; accepted examples: stage_code, stage, technique_code, 阶段, 技术编号")
+        raise ValueError("answer table has no recognized label column; accepted examples: 攻击技术名称或正常流量, stage_code, stage, technique_code, 阶段, 技术编号")
 
     pred_by_primary: dict[tuple[str, str], list[int]] = {}
     pred_by_number: dict[str, list[int]] = {}
@@ -227,9 +251,11 @@ def evaluate(predictions: Path, answer: Path, output_dir: Path, predictions_json
     valid_pairs = 0
     for answer_index, pred_index, method in matched:
         answer_row, pred_row = answer_rows[answer_index], pred_rows[pred_index]
-        expected_technique = value(answer_row, answer_cols, "technique").upper()
-        expected = normalize_stage(value(answer_row, answer_cols, "stage") or expected_technique)
-        predicted = normalize_stage(value(pred_row, pred_cols, "stage"))
+        answer_label = value(answer_row, answer_cols, "technique") or value(answer_row, answer_cols, "stage")
+        expected_technique = normalize_technique(answer_label)
+        expected = normalize_stage(value(answer_row, answer_cols, "stage") or expected_technique or answer_label)
+        predicted_technique = normalize_technique(value(pred_row, pred_cols, "technique"))
+        predicted = normalize_stage(value(pred_row, pred_cols, "stage") or predicted_technique)
         number = value(pred_row, pred_cols, "number")
         if expected not in STAGES or predicted not in STAGES:
             unmatched.append({"side": "pair", "answer_row": answer_index + 2, "prediction_row": pred_index + 2, "number": number, "reason": f"invalid stage expected={expected or '?'} predicted={predicted or '?'}"})
@@ -240,9 +266,10 @@ def evaluate(predictions: Path, answer: Path, output_dir: Path, predictions_json
         if expected != predicted:
             errors.append({"answer_row": answer_index + 2, "prediction_row": pred_index + 2, "pcap": pcap_key(value(pred_row, pred_cols, "pcap")), "number": number, "expected_stage": expected, "predicted_stage": predicted})
         technique_key = number or pcap_key(value(pred_row, pred_cols, "pcap"))
-        if expected_technique in TECHNIQUE_TO_STAGE and technique_key in technique_predictions:
+        predicted_technique = predicted_technique or technique_predictions.get(technique_key, "")
+        if expected_technique in TECHNIQUE_TO_STAGE and predicted_technique:
             technique_total += 1
-            technique_correct += technique_predictions[technique_key] == expected_technique
+            technique_correct += predicted_technique == expected_technique
 
     correct = sum(confusion[(stage, stage)] for stage in STAGES)
     overall = correct / valid_pairs if valid_pairs else 0.0
@@ -276,6 +303,7 @@ def evaluate(predictions: Path, answer: Path, output_dir: Path, predictions_json
         f"- Matched valid rows: {valid_pairs}",
         f"- Unmatched or invalid rows: {len(unmatched)}",
         f"- Overall stage accuracy: {overall:.4f}",
+        f"- Technique accuracy: {technique_correct / technique_total if technique_total else 0.0:.4f} ({technique_correct}/{technique_total})",
         f"- Normal-vs-attack accuracy: {normal_vs_attack_correct / valid_pairs if valid_pairs else 0.0:.4f}",
         f"- Normal accuracy: {normal_correct / normal_total if normal_total else 0.0:.4f} ({normal_correct}/{normal_total})",
         f"- Attack-stage accuracy: {attack_correct / attack_total if attack_total else 0.0:.4f} ({attack_correct}/{attack_total})",
@@ -291,7 +319,16 @@ def evaluate(predictions: Path, answer: Path, output_dir: Path, predictions_json
         lines.append("- Optional technique accuracy: not available (no alignable technique labels and guesses).")
     lines.extend(["", "## Artifacts", "", "- `confusion_matrix.csv`", "- `errors.csv`", "- `unmatched_rows.csv`", ""])
     (output_dir / "eval_report.md").write_text("\n".join(lines), encoding="utf-8")
-    return {"matched": valid_pairs, "unmatched": len(unmatched), "accuracy": overall, "errors": len(errors)}
+    return {
+        "matched": valid_pairs,
+        "unmatched": len(unmatched),
+        "accuracy": overall,
+        "stage_accuracy": overall,
+        "technique_accuracy": technique_correct / technique_total if technique_total else 0.0,
+        "technique_matched": technique_total,
+        "normal_vs_attack_accuracy": normal_vs_attack_correct / valid_pairs if valid_pairs else 0.0,
+        "errors": len(errors),
+    }
 
 
 def main() -> int:

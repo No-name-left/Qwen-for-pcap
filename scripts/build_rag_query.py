@@ -368,6 +368,7 @@ def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
             "payload_visibility_summary", "http_context_summary", "dns_context_summary",
             "tls_context_summary", "ftp_context_summary", "top_suspicious_sessions",
             "top_payload_evidence", "suspicious_indicator_counts",
+            "candidate_technique_scores", "primary_rule_candidate", "rule_evidence",
         ):
             add_term(terms, record.get(field))
         scan_summary = record.get("scan_group_summary") or {}

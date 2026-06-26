@@ -71,6 +71,7 @@ OBSERVABLE_KEYS = [
     "exploit_indicators", "vuln_scan_indicators", "auth_indicators",
     "implant_indicators", "backdoor_access_indicators", "c2_indicators",
     "transferred_files_summary", "dns_summary", "tls_summary", "pcap_summary", "evidence_limits",
+    "candidate_technique_scores", "primary_rule_candidate", "rule_evidence",
     "payload_visibility_summary", "http_context_summary", "dns_context_summary",
     "tls_context_summary", "ftp_context_summary", "scan_group_summary",
     "auth_attempt_summary", "beacon_like_summary", "suspicious_indicator_counts",
@@ -190,8 +191,9 @@ def phase1_instruction_block() -> str:
     return (
         f"PROMPT_VERSION: {PROMPT_VERSION}\n"
         "Classify exactly one PCAP session or behavioral group for Phase-1 scoring. Predict stage_code first; technique_guess is optional best-effort detail and never overrides stage_code.\n"
-        "If record_type is pcap, judge the whole PCAP as one Phase-1 item: aggregate all sessions/groups, produce one stage_code for the entire PCAP, and use top_suspicious_sessions/top_payload_evidence only as representative evidence.\n"
+        "If record_type is pcap, you are judging the whole PCAP, not a single session: aggregate all sessions/groups, produce one stage_code for the entire PCAP, and use top_suspicious_sessions/top_payload_evidence only as representative evidence.\n"
         "If record_type is session or a behavioral group, judge only that record with same-PCAP aggregates as context.\n"
+        "candidate_technique_scores are deterministic evidence priors. Prefer the highest-scoring candidate unless there is clear contradictory evidence. Do not classify as TN01_01 if the PCAP contains explicit attack indicators such as exploit indicators, auth brute-force indicators, beacon/C2 indicators, sensitive-path vulnerability probes, or implant/upload indicators.\n"
         "Return exactly one JSON object.\n"
         "Do not output Markdown, a Thinking Process, or explanations before or after JSON.\n"
         "The first character must be \"{\" and the last character must be \"}\".\n"
@@ -206,6 +208,8 @@ def phase1_instruction_block() -> str:
         "TA01 needs repeated credential failures/credential fields, high attempt rate, failure burst, success-after-failures hint, or exploit-specific payload, URI, injection, traversal, malicious parameter, or vulnerability-trigger evidence. A single login failure is not brute force.\n"
         "TA03 needs network-visible delivery/upload or implant-placement evidence such as multipart/form-data, webshell-like filename, or payload delivery; never claim host-side installation succeeded from PCAP alone.\n"
         "TA11 needs attacker-initiated access to an existing backdoor endpoint/command parameter or victim-initiated repeated callback/beacon/C2 behavior supported by fixed endpoint, timing, direction, byte-pattern, DNS/SNI, and benign-periodic context.\n"
+        "Close-technique rules: TA43_01=port/host discovery with many destination ports and little application probing; TA43_02=web/service vulnerability discovery including sensitive paths, scanner-like URIs, 404/403/502 probe responses, CVE/admin/config/db paths; TA01_01=repeated login/auth attempts, especially against authentication service ports; TA01_02=visible exploit attempt, command injection, traversal, SQLi, RCE, or malicious parameters; TA03_01=payload delivery or implant placement and requires upload/drop/write/file placement evidence stronger than generic exploit POST; TA11_01=interactive access to an existing backdoor endpoint, command parameter, or webshell command use; TA11_02=callback/beacon/C2, repeated fixed endpoint, periodic small flows, encrypted beacon-like flows, or miner heartbeat; TN01_01=normal only when no meaningful attack indicator is present.\n"
+        "Encrypted traffic is not automatically benign. If encrypted sessions are endpoint-fixed, repeated, periodic, or beacon-like, prefer TA11_02 over TN01_01.\n"
         "When evidence is ambiguous, choose the best-supported stage and lower confidence. TN01 is allowed when attack evidence remains insufficient after behavioral review.\n"
         f"Allowed stage_code values: {', '.join(STAGE_CODES)}. Allowed non-null technique_guess values: {', '.join(TECHNIQUE_CODES)}.\n"
         "Required JSON fields: record_id, pcap_id, record_type, start_time, end_time, src_ip, src_port, dst_ip, dst_port, stage_code, technique_guess, confidence, reason.\n"

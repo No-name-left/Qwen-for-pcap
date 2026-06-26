@@ -31,8 +31,9 @@ DEFAULT_CONFIG = ROOT / "configs/phase1_vm.yaml"
 STAGE_FIELD = "攻击阶段编号或正常流量编号"
 REASON_FIELD = "研判理由（不计入评分）"
 CSV_FIELDS = [
-    "pcap", "编号", "开始时间", "结束时间", "源IP", "源端口", "目的IP", "目的端口",
-    STAGE_FIELD, REASON_FIELD, "pcap_id", "pcap_name", "record_type", "technique_guess", "confidence",
+    "pcap", "pcap_id", "pcap_name", "record_id", "record_type", "编号",
+    "开始时间", "结束时间", "源IP", "源端口", "目的IP", "目的端口",
+    STAGE_FIELD, "stage_code", "technique_guess", "confidence", REASON_FIELD, "reason",
 ]
 PCAP_SUFFIXES = {".pcap", ".pcapng", ".cap"}
 
@@ -455,6 +456,14 @@ def confidence_value(value: Any) -> float:
     return round(number, 4)
 
 
+def stage_from_technique(value: Any) -> str:
+    technique = str(value or "").strip().upper()
+    if technique in TECHNIQUE_TO_STAGE:
+        return TECHNIQUE_TO_STAGE[technique]
+    prefix = technique.split("_", 1)[0]
+    return prefix if prefix in STAGE_CODES else ""
+
+
 def safe_exception(exc: Exception) -> str:
     if isinstance(exc, (ValueError, TypeError, json.JSONDecodeError)):
         return f"{type(exc).__name__}: {exc}"
@@ -469,11 +478,11 @@ def validate_prediction(item: dict[str, Any], record: dict[str, Any]) -> dict[st
     if record_id != expected_id:
         raise ValueError(f"record_id mismatch: expected {expected_id}, received {record_id or '<empty>'}")
     legacy_technique = str(item.get("technique_code") or item.get("predicted_code") or "").upper()
-    stage = str(item.get("stage_code") or TECHNIQUE_TO_STAGE.get(legacy_technique, "")).upper()
-    if stage not in STAGE_CODES:
-        raise ValueError(f"invalid stage_code: {stage or '<empty>'}")
     raw_technique = item.get("technique_guess") or legacy_technique or None
     technique = None if raw_technique in (None, "", "null") else str(raw_technique).upper()
+    stage = str(item.get("stage_code") or stage_from_technique(technique or legacy_technique)).upper()
+    if stage not in STAGE_CODES:
+        raise ValueError(f"invalid stage_code: {stage or '<empty>'}")
     if technique is not None and technique not in TECHNIQUE_CODES:
         raise ValueError(f"invalid technique_guess: {technique}")
     reason = " ".join(str(item.get("reason") or "").split())
@@ -553,18 +562,28 @@ def run_api(config: dict[str, Any], paths: dict[str, Path], records: list[dict[s
 
 
 def official_rows(results: list[dict[str, Any]], record_to_pcap: dict[str, str]) -> list[dict[str, Any]]:
-    return [{
-        "pcap": record_to_pcap.get(item["record_id"], item.get("pcap_id") or ""),
-        "pcap_id": item.get("pcap_id") or "",
-        "pcap_name": record_to_pcap.get(item["record_id"], item.get("pcap_id") or ""),
-        "record_type": item.get("record_type") or "",
-        "编号": item["record_id"],
-        "开始时间": item.get("start_time"), "结束时间": item.get("end_time"),
-        "源IP": item.get("src_ip"), "源端口": item.get("src_port"),
-        "目的IP": item.get("dst_ip"), "目的端口": item.get("dst_port"),
-        STAGE_FIELD: item["stage_code"], "technique_guess": item.get("technique_guess") or "",
-        "confidence": item.get("confidence"), REASON_FIELD: item.get("reason") or "",
-    } for item in results]
+    rows = []
+    for item in results:
+        technique = item.get("technique_guess") or ""
+        stage = item.get("stage_code") or stage_from_technique(technique)
+        reason = item.get("reason") or ""
+        pcap_name = record_to_pcap.get(item["record_id"], item.get("pcap_id") or "")
+        rows.append({
+            "pcap": pcap_name,
+            "pcap_id": item.get("pcap_id") or "",
+            "pcap_name": pcap_name,
+            "record_id": item["record_id"],
+            "record_type": item.get("record_type") or "",
+            "编号": item["record_id"],
+            "开始时间": item.get("start_time"), "结束时间": item.get("end_time"),
+            "源IP": item.get("src_ip"), "源端口": item.get("src_port"),
+            "目的IP": item.get("dst_ip"), "目的端口": item.get("dst_port"),
+            STAGE_FIELD: stage, "stage_code": stage,
+            "technique_guess": technique,
+            "confidence": item.get("confidence"),
+            REASON_FIELD: reason, "reason": reason,
+        })
+    return rows
 
 
 def safe_config_report(config: dict[str, Any]) -> dict[str, Any]:
