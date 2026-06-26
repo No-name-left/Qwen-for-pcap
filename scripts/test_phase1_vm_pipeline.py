@@ -15,7 +15,7 @@ from build_qwen35_session_prompts import STAGE_CODES, TECHNIQUE_TO_STAGE, build_
 from build_rag_query import detect_confusion_groups, record_terms, targeted_rag_metadata
 from evaluate_phase1_predictions import evaluate
 from parse_public_pcaps import discover_pcaps, parse_case
-from run_phase1_pipeline import official_rows, qwen_extra_body, run_api, safe_config_report, validate_prediction, write_candidate_diagnostics
+from run_phase1_pipeline import apply_safe_calibration, official_rows, qwen_extra_body, run_api, safe_config_report, validate_prediction, write_candidate_diagnostics
 from technique_profiles import TECHNIQUE_PROFILES, technique_codes, validate_profiles
 
 
@@ -83,7 +83,7 @@ class Phase1PromptTests(unittest.TestCase):
             "top_payload_evidence": [{"source_record_id": "phase1_001::session::000002", "field": "suspicious_payload_snippets", "text": "cmd=whoami"}],
         }
         profile = {
-            "name": "test", "max_prompt_tokens": 2200, "max_prompt_chars": 6600,
+            "name": "test", "max_prompt_tokens": 2400, "max_prompt_chars": 7200,
             "max_session_context_chars": 2200, "max_rag_chunks": 1, "max_rag_chars_per_chunk": 300,
         }
         prompt, meta = build_phase1_prompt(record, [], profile)
@@ -91,6 +91,8 @@ class Phase1PromptTests(unittest.TestCase):
         self.assertIn("judging the whole PCAP", prompt)
         self.assertIn("one stage_code for the entire PCAP", prompt)
         self.assertIn("candidate_technique_scores are deterministic evidence priors", prompt)
+        self.assertIn("binary, encoded, compressed, or chunked content alone is not exploitation evidence", prompt)
+        self.assertIn("missing POST body or payload visibility is not proof of benign behavior", prompt)
         self.assertIn("Do not classify as TN01_01", prompt)
         self.assertIn("source_session_count", prompt)
         self.assertIn("candidate_technique_scores", prompt)
@@ -119,7 +121,7 @@ class Phase1PromptTests(unittest.TestCase):
             "limit": 5, "rag_top_k": 4, "max_prompt_tokens": 6000, "request_timeout": 180,
             "max_retries": 2, "enable_thinking": False, "save_prompt_samples": True, "prompt_sample_limit": 5,
             "prefer_zeek": True, "allow_tshark_fallback": True, "zeek_docker_image": "zeek:test",
-            "enable_tshark_observable_supplement": True,
+            "enable_tshark_observable_supplement": True, "enable_safe_calibration": True,
         }
         report = safe_config_report(config)
         self.assertNotIn("api_key", report)
@@ -127,6 +129,7 @@ class Phase1PromptTests(unittest.TestCase):
         self.assertEqual(report["thinking_control"], "chat_template_kwargs.enable_thinking")
         self.assertFalse(report["enable_thinking"])
         self.assertTrue(report["enable_tshark_observable_supplement"])
+        self.assertTrue(report["enable_safe_calibration"])
         self.assertEqual(report["granularity"], "pcap")
 
     def test_qwen_extra_body_uses_chat_template_kwargs(self) -> None:
@@ -178,6 +181,53 @@ class Phase1PromptTests(unittest.TestCase):
         self.assertEqual(captured[0]["extra_body"], {"chat_template_kwargs": {"enable_thinking": False}})
         self.assertNotIn("enable_thinking", captured[0]["extra_body"])
 
+    def test_safe_calibration_applies_only_for_strong_margin(self) -> None:
+        record = {
+            "record_id": "phase1_001::pcap", "pcap_id": "phase1_001", "record_type": "pcap",
+            "primary_rule_candidate": "TA01_02",
+            "top_rule_candidates": [{"technique": "TA01_02", "score": 7.0}, {"technique": "TN01_01", "score": 2.0}],
+            "score_margin": 5.0, "evidence_strength": "strong",
+            "rule_evidence": ["exploit_indicators > 0"],
+            "candidate_counter_evidence": {},
+            "rule_conflict_flags": [],
+            "weak_attack_uncertainty": False,
+        }
+        result = {
+            "record_id": "phase1_001::pcap", "pcap_id": "phase1_001", "record_type": "pcap",
+            "stage_code": "TN01", "technique_guess": "TN01_01", "confidence": 0.6,
+            "reason": "The traffic looks normal.",
+        }
+        adjusted, stats = apply_safe_calibration({"enable_safe_calibration": True}, [record], [result])
+        self.assertEqual(stats["safe_calibrations_applied"], 1)
+        self.assertTrue(adjusted[0]["calibration_applied"])
+        self.assertEqual(adjusted[0]["technique_guess"], "TA01_02")
+        self.assertEqual(adjusted[0]["stage_code"], "TA01")
+        self.assertEqual(adjusted[0]["pre_calibration_technique"], "TN01_01")
+        self.assertEqual(adjusted[0]["post_calibration_technique"], "TA01_02")
+
+    def test_safe_calibration_skips_weak_or_uncertain_evidence(self) -> None:
+        record = {
+            "record_id": "phase1_001::pcap", "pcap_id": "phase1_001", "record_type": "pcap",
+            "primary_rule_candidate": "TA03_01",
+            "top_rule_candidates": [{"technique": "TA03_01", "score": 6.0}, {"technique": "TN01_01", "score": 2.0}],
+            "score_margin": 4.0, "evidence_strength": "strong",
+            "rule_evidence": ["dynamic POST endpoint has no visible HTTP body"],
+            "candidate_counter_evidence": {},
+            "rule_conflict_flags": ["weak_dynamic_post_no_payload_visibility"],
+            "weak_attack_uncertainty": True,
+        }
+        result = {
+            "record_id": "phase1_001::pcap", "pcap_id": "phase1_001", "record_type": "pcap",
+            "stage_code": "TN01", "technique_guess": "TN01_01", "confidence": 0.5,
+            "reason": "Only weak dynamic POST evidence is visible.",
+        }
+        adjusted, stats = apply_safe_calibration({"enable_safe_calibration": True}, [record], [result])
+        self.assertEqual(stats["safe_calibrations_applied"], 0)
+        self.assertEqual(stats["safe_calibrations_skipped"], 1)
+        self.assertFalse(adjusted[0]["calibration_applied"])
+        self.assertEqual(adjusted[0]["technique_guess"], "TN01_01")
+        self.assertIn("weak_or_uncertain", adjusted[0]["calibration_reason"])
+
     def test_pcap_level_records_aggregate_one_record_per_pcap(self) -> None:
         cards = [
             {"pcap_id": "phase1_001", "session_id": "s1", "record_type": "session", "start_time": 1.0, "end_time": 1.2, "src_ip": "10.0.0.1", "dst_ip": "10.0.0.2", "dst_port": 80, "proto": "tcp", "service": "http", "parser_source": "zeek_conn"},
@@ -222,6 +272,9 @@ class Phase1PromptTests(unittest.TestCase):
             "auth_attempt_summary": {"failed_login_count": 6, "max_attempt_count": 6},
             "top_payload_evidence": [{"text": "cmd=whoami"}],
             "exploit_indicators": {"command_injection": True},
+            "benign_profile_score": 2.0,
+            "payload_observability_gap": True,
+            "http_body_missing_for_post": True,
         }
         terms, rules, low_signal = record_terms(record)
         groups = detect_confusion_groups(record)
@@ -231,7 +284,11 @@ class Phase1PromptTests(unittest.TestCase):
         self.assertIn("pcap_scan_summary:TA43", rules)
         self.assertIn("pcap_auth_summary:TA01_01", rules)
         self.assertIn("pcap_payload_evidence", rules)
+        self.assertIn("benign_download_profile:TN01_01_counter", rules)
+        self.assertIn("weak_dynamic_post_no_payload_visibility", rules)
         self.assertIn("pcap_scan_summary=positive", triggers)
+        self.assertIn("benign_download_profile=positive", triggers)
+        self.assertIn("weak_dynamic_post_no_body_visibility=positive", triggers)
         self.assertTrue(docs)
 
     def test_official_rows_preserve_core_columns_and_pcap_metadata(self) -> None:
@@ -331,7 +388,8 @@ class Phase1PromptTests(unittest.TestCase):
             "suspicious_payload_snippets": ["binary chunk data"],
         }])
         self.assertGreater(steam["candidate_technique_scores"]["TN01_01"], steam["candidate_technique_scores"]["TA01_02"])
-        self.assertTrue(any("download/chunk" in item for item in steam["candidate_counter_evidence"]["TA01_02"]))
+        self.assertGreater(steam["benign_profile_score"], 0)
+        self.assertTrue(any("binary/chunk/download" in item for item in steam["candidate_counter_evidence"]["TA01_02"]))
 
         webshell = one_pcap_record([{
             "pcap_id": "phase1_001", "record_id": "phase1_001::session::shell", "record_type": "session",
@@ -339,6 +397,18 @@ class Phase1PromptTests(unittest.TestCase):
             "exploit_indicators": {"command_injection": True},
         }])
         self.assertGreater(webshell["candidate_technique_scores"]["TA11_01"], webshell["candidate_technique_scores"]["TA01_02"])
+
+        benign_with_webshell = one_pcap_record([{
+            "pcap_id": "phase1_001", "record_id": "phase1_001::session::mixed", "record_type": "session",
+            "http_hosts": ["cdn.steamcontent.com"],
+            "http_user_agents": ["Valve/Steam HTTP Client"],
+            "http_content_types": ["application/x-steam-chunk"],
+            "http_uris_sample": ["/depot/123/chunk/abcdef", "/shell.php?cmd=whoami"],
+            "suspicious_http_parameters": ["cmd=whoami"],
+            "exploit_indicators": {"command_injection": True},
+        }])
+        self.assertGreater(benign_with_webshell["candidate_technique_scores"]["TA11_01"], benign_with_webshell["candidate_technique_scores"]["TN01_01"])
+        self.assertIn("benign_profile_with_attack_indicators", benign_with_webshell["rule_conflict_flags"])
 
         placement = one_pcap_record([{
             "pcap_id": "phase1_001", "record_id": "phase1_001::session::upload", "record_type": "session",
@@ -352,7 +422,22 @@ class Phase1PromptTests(unittest.TestCase):
             "http_methods": ["POST"], "http_uris_sample": ["/chuli.php"],
         }])
         self.assertIn("generic_php_post_weak_implant_evidence", weak_php["rule_conflict_flags"])
+        self.assertIn("weak_dynamic_post_no_payload_visibility", weak_php["rule_conflict_flags"])
+        self.assertTrue(weak_php["payload_observability_gap"])
+        self.assertTrue(weak_php["http_body_missing_for_post"])
+        self.assertTrue(weak_php["weak_implant_candidate"])
+        self.assertTrue(weak_php["weak_attack_uncertainty"])
+        self.assertIn("missing HTTP body visibility", json.dumps(weak_php["candidate_counter_evidence"], ensure_ascii=False))
         self.assertLess(weak_php["candidate_technique_scores"]["TA03_01"], 1.0)
+
+        benign_dynamic_post = one_pcap_record([{
+            "pcap_id": "phase1_001", "record_id": "phase1_001::session::benignpost", "record_type": "session",
+            "http_methods": ["POST"], "http_hosts": ["cdn.steamcontent.com"], "http_uris_sample": ["/chuli.php", "/depot/123/chunk/abcdef"],
+            "http_user_agents": ["Valve/Steam HTTP Client"], "http_content_types": ["application/x-steam-chunk"],
+        }])
+        self.assertTrue(benign_dynamic_post["payload_observability_gap"])
+        self.assertFalse(benign_dynamic_post["weak_implant_candidate"])
+        self.assertGreater(benign_dynamic_post["candidate_technique_scores"]["TN01_01"], benign_dynamic_post["candidate_technique_scores"]["TA03_01"])
 
     def test_candidate_scores_csv_is_generated(self) -> None:
         record = one_pcap_record([{
@@ -385,6 +470,10 @@ class Phase1PromptTests(unittest.TestCase):
             self.assertTrue(paths["candidate_score_report"].exists())
             text = paths["candidate_scores"].read_text(encoding="utf-8-sig")
             self.assertIn("primary_rule_candidate", text)
+            self.assertIn("benign_profile_score", text)
+            self.assertIn("payload_observability_gap", text)
+            self.assertIn("calibration_applied", text)
+            self.assertIn("pre_calibration_technique", text)
             self.assertIn("TA01_02", text)
 
 

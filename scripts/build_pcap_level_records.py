@@ -38,11 +38,18 @@ SENSITIVE_PATH_RE = re.compile(
 MINER_RE = re.compile(r"(?i)(?:/miner/ping\b|\bminer\b|\bhashrate\b|\bethminer\b|\bmining\b|\bworker\b|\brig\b|heartbeat[-_ ]?like ping)")
 BENIGN_UPDATE_RE = re.compile(
     r"(?i)(?:steam|valve|depot|chunk|application/x-steam-chunk|cdn|static|assets|"
-    r"update|updater|download|patch|manifest|\.css\b|\.js\b|\.png\b|\.jpe?g\b|\.gif\b|\.ico\b|ocsp|crl|ntp)"
+    r"steamcontent|content-length|range:|bytes=|206 partial|large binary|binary chunk|"
+    r"update|updater|download|patch|manifest|application/octet-stream|"
+    r"\.css\b|\.js\b|\.png\b|\.jpe?g\b|\.gif\b|\.ico\b|\.woff2?\b|ocsp|crl|ntp)"
 )
 WEBSHELL_ENDPOINT_RE = re.compile(r"(?i)/(?:shell|cmd|webshell|chopper|c99|r57)\.(?:php|jsp|jspx|asp|aspx)\b")
 COMMAND_INTENT_RE = re.compile(r"(?i)(?:[?&](?:cmd|command|exec|action)=|(?:whoami|ipconfig|ifconfig|uname|id)(?:\b|%))")
-GENERIC_PHP_POST_RE = re.compile(r"(?i)(?:\bPOST\b|\"POST\"|http_methods.*post).{0,160}/[^/?#]{1,80}\.php\b")
+DYNAMIC_ENDPOINT_RE = re.compile(r"(?i)/[^/?#\s\"']{1,100}\.(?:php|jsp|jspx|asp|aspx)\b")
+DYNAMIC_POST_RE = re.compile(r"(?i)(?:\bPOST\b|\"POST\"|http_methods.*post).{0,180}/[^/?#\s\"']{1,100}\.(?:php|jsp|jspx|asp|aspx)\b")
+UNCOMMON_DYNAMIC_ENDPOINT_RE = re.compile(
+    r"(?i)/(?:chuli|upload|upfile|file|save|process|submit|action|ajax|gate|cmd|shell|webshell|"
+    r"backdoor|install|handle|do)\.(?:php|jsp|jspx|asp|aspx)\b"
+)
 FILE_PLACEMENT_RE = re.compile(
     r"(?i)(?:multipart/form-data|\bfilename\s*=|/(?:upload|uploads|plugin/install|admin/upload)\b|"
     r"\.(?:php|jsp|jspx|asp|aspx|war|exe|dll|elf|sh|py)(?:$|[?&#/])|"
@@ -225,7 +232,88 @@ def strong_file_placement_active(record: dict[str, Any], blob: str) -> bool:
 
 
 def benign_update_active(blob: str, rows: list[dict[str, Any]]) -> bool:
-    return bool(BENIGN_UPDATE_RE.search(blob) or BENIGN_UPDATE_RE.search(evidence_blob(rows)))
+    return benign_profile_score(blob, rows) >= 1.5
+
+
+def benign_profile_score(blob: str, rows: list[dict[str, Any]]) -> float:
+    full = f"{blob} {evidence_blob(rows)}"
+    score = 0.0
+    if re.search(r"(?i)(?:steam|valve|steamcontent|depot|application/x-steam-chunk)", full):
+        score += 2.4
+    if re.search(r"(?i)(?:cdn|static|assets|update|updater|download|patch|manifest|ocsp|crl|ntp)", full):
+        score += 1.0
+    if re.search(r"(?i)(?:\.css\b|\.js\b|\.png\b|\.jpe?g\b|\.gif\b|\.ico\b|\.woff2?\b|image/|font/|application/octet-stream)", full):
+        score += 0.8
+    if re.search(r"(?i)(?:chunk|range:|bytes=|content-length|206 partial|large binary|binary chunk)", full):
+        score += 0.8
+    return round(min(score, 5.0), 3)
+
+
+def post_method_active(record: dict[str, Any], rows: list[dict[str, Any]], blob: str) -> bool:
+    if re.search(r"(?i)(?:\bPOST\b|\"POST\"|http_methods.*post)", blob):
+        return True
+    for item in [record, *rows]:
+        methods = item.get("http_methods")
+        if isinstance(methods, list) and any(str(method).upper() == "POST" for method in methods):
+            return True
+        if isinstance(methods, str) and "POST" in methods.upper():
+            return True
+        if re.search(r"(?i)\bPOST\b", json.dumps(item.get("http_summary") or {}, ensure_ascii=False)):
+            return True
+    return False
+
+
+def body_payload_visible(record: dict[str, Any], rows: list[dict[str, Any]]) -> bool:
+    payload_summary = record.get("payload_visibility_summary") or {}
+    if bool(record.get("http_body_observed")) or as_count(payload_summary.get("http_body_observed_records")) > 0:
+        return True
+    body_fields = (
+        "request_body_snippets_sanitized",
+        "response_body_snippets_sanitized",
+        "suspicious_payload_snippets",
+        "http_upload_hints",
+        "transferred_files_summary",
+        "top_payload_evidence",
+    )
+    if any(non_empty(record.get(field)) for field in body_fields):
+        return True
+    return any(any(non_empty(row.get(field)) for field in body_fields[:-1]) or bool(row.get("http_body_observed")) for row in rows)
+
+
+def attack_indicator_score(
+    record: dict[str, Any],
+    *,
+    scan_active: bool,
+    repeated_auth: bool,
+    file_placement: bool,
+    webshell_access: bool,
+    sensitive_path: bool,
+    miner_heartbeat: bool,
+    suspicious_payload_count: float,
+) -> float:
+    counts = record.get("suspicious_indicator_counts") or {}
+    score = 0.0
+    if scan_active:
+        score += 3.0
+    score += min(3.0, as_count(counts.get("vuln_scan_indicators")) * 2.0)
+    score += min(4.0, as_count(counts.get("exploit_indicators")) * 3.0)
+    score += min(3.5, as_count(counts.get("auth_indicators")) * 2.5)
+    score += min(3.0, as_count(counts.get("implant_indicators")) * 2.0)
+    score += min(4.0, as_count(counts.get("backdoor_access_indicators")) * 3.0)
+    score += min(3.5, as_count(counts.get("c2_indicators")) * 2.5)
+    if repeated_auth:
+        score += 3.0
+    if file_placement:
+        score += 2.5
+    if webshell_access:
+        score += 4.5
+    if sensitive_path:
+        score += 3.0
+    if miner_heartbeat:
+        score += 4.0
+    if suspicious_payload_count > 0:
+        score += 0.7
+    return round(min(score, 10.0), 3)
 
 
 def webshell_access_active(blob: str) -> bool:
@@ -265,15 +353,35 @@ def score_pcap_candidates(record: dict[str, Any], rows: list[dict[str, Any]]) ->
 
     explicit_attack = False
     weak_attack = False
-    benign_context = benign_update_active(blob, rows)
+    benign_score = benign_profile_score(blob, rows)
+    benign_context = benign_score >= 1.5
     repeated_auth = repeated_auth_service_active(record, rows)
     file_placement = strong_file_placement_active(record, blob)
     webshell_access = webshell_access_active(blob)
-    generic_php_post = bool(GENERIC_PHP_POST_RE.search(blob))
+    http_post = post_method_active(record, rows, blob)
+    dynamic_endpoint = bool(DYNAMIC_ENDPOINT_RE.search(blob))
+    post_to_dynamic_endpoint = bool(DYNAMIC_POST_RE.search(blob) or (http_post and dynamic_endpoint))
+    uncommon_dynamic_endpoint = bool(UNCOMMON_DYNAMIC_ENDPOINT_RE.search(blob))
+    body_visible = body_payload_visible(record, rows)
+    http_body_missing_for_post = bool(post_to_dynamic_endpoint and not body_visible)
+    payload_observability_gap = bool(http_body_missing_for_post)
+    generic_dynamic_post = post_to_dynamic_endpoint
     sensitive_path = bool(SENSITIVE_PATH_RE.search(blob))
     miner_heartbeat = bool(MINER_RE.search(blob))
+    scan_active = as_count(scan_summary.get("max_unique_dst_ports")) >= 8 or as_count(scan_summary.get("scan_like_record_count")) > 0
+    suspicious_payload_count = as_count(payload_summary.get("suspicious_payload_record_count")) + len(record.get("top_payload_evidence") or [])
+    profile_attack_score = attack_indicator_score(
+        record,
+        scan_active=scan_active,
+        repeated_auth=repeated_auth,
+        file_placement=file_placement,
+        webshell_access=webshell_access,
+        sensitive_path=sensitive_path,
+        miner_heartbeat=miner_heartbeat,
+        suspicious_payload_count=suspicious_payload_count,
+    )
 
-    if as_count(scan_summary.get("max_unique_dst_ports")) >= 8 or as_count(scan_summary.get("scan_like_record_count")) > 0:
+    if scan_active:
         add("TA43_01", 3.5, "scan_group_summary shows port/target fanout")
         explicit_attack = True
         if as_count(scan_summary.get("max_failed_conn_rate")) >= 0.4:
@@ -290,7 +398,6 @@ def score_pcap_candidates(record: dict[str, Any], rows: list[dict[str, Any]]) ->
         explicit_attack = True
 
     exploit_count = as_count(counts.get("exploit_indicators"))
-    suspicious_payload_count = as_count(payload_summary.get("suspicious_payload_record_count")) + len(record.get("top_payload_evidence") or [])
     if exploit_count > 0:
         add("TA01_02", 3.2, "exploit_indicators > 0")
         explicit_attack = True
@@ -328,8 +435,11 @@ def score_pcap_candidates(record: dict[str, Any], rows: list[dict[str, Any]]) ->
             add("TA01_02", 2.0, "generic exploit POST/payload without clear file placement favors TA01_02 over TA03_01")
             counter("TA03_01", 1.0, "generic exploit POST without file placement is weak implant evidence")
         weak_attack = True
-    elif generic_php_post:
-        add("TA03_01", 0.6, "POST to PHP endpoint without body/file evidence is weak implant evidence", weak=True)
+    elif generic_dynamic_post:
+        reason = "POST to dynamic endpoint without body/file evidence is weak implant evidence"
+        if payload_observability_gap:
+            reason = "dynamic POST endpoint has no visible HTTP body; payload observability gap only supports weak implant evidence"
+        add("TA03_01", 0.6, reason, weak=True)
         counter("TA03_01", 0.4, "no upload, filename, script payload, or file placement evidence")
         weak_attack = True
 
@@ -362,15 +472,27 @@ def score_pcap_candidates(record: dict[str, Any], rows: list[dict[str, Any]]) ->
             counter("TA11_02", 1.0, "benign update/download/chunk context counters beacon interpretation")
             note(candidate_counter_evidence, "TN01_01", "benign context exists but explicit attack indicators are present")
         else:
-            add("TN01_01", 3.5, "benign software/update/download/static/chunk traffic and no strong attack indicator")
-            counter("TA01_02", 1.4, "download/chunk traffic can contain binary or encoded body without exploitation")
+            add("TN01_01", min(4.5, 3.0 + benign_score / 3.0), "benign software/update/download/static/chunk traffic and no strong attack indicator")
+            counter("TA01_02", 1.6, "binary/chunk/download content alone is not exploitation evidence")
             counter("TA11_02", 1.2, "update/download/chunk traffic is common C2 false positive")
+            counter("TA03_01", 0.6, "download/update profile counters implant placement when upload/drop evidence is absent")
     if not explicit_attack:
         if weak_attack:
             add("TN01_01", 0.8, "only weak attack evidence is visible")
             note(candidate_counter_evidence, "TN01_01", "weak suspicious evidence requires LLM boundary review")
+            if payload_observability_gap:
+                note(candidate_counter_evidence, "TN01_01", "missing HTTP body visibility is an observability gap, not benign proof")
         else:
             add("TN01_01", 2.2, "no meaningful attack indicator in PCAP-level aggregate")
+
+    weak_implant_candidate = bool(
+        post_to_dynamic_endpoint
+        and http_body_missing_for_post
+        and not file_placement
+        and not explicit_attack
+        and not benign_context
+    )
+    weak_attack_uncertainty = bool(weak_attack or weak_implant_candidate or payload_observability_gap)
 
     for code in scores:
         scores[code] = round(min(10.0, max(0.0, scores[code])), 3)
@@ -389,10 +511,14 @@ def score_pcap_candidates(record: dict[str, Any], rows: list[dict[str, Any]]) ->
         conflict_flags.append("attack_indicators_vs_normal_candidate")
     if benign_context and primary != "TN01_01" and not explicit_attack:
         conflict_flags.append("benign_context_vs_attack_candidate")
+    if benign_context and explicit_attack:
+        conflict_flags.append("benign_profile_with_attack_indicators")
     if repeated_auth and scores.get("TA11_02", 0) > 0:
         conflict_flags.append("auth_service_repetition_counters_c2")
-    if generic_php_post and not file_placement:
+    if generic_dynamic_post and not file_placement:
         conflict_flags.append("generic_php_post_weak_implant_evidence")
+    if post_to_dynamic_endpoint and payload_observability_gap and not file_placement:
+        conflict_flags.append("weak_dynamic_post_no_payload_visibility")
     rule_evidence = candidate_evidence.get(primary, [])[:8]
     if not rule_evidence:
         rule_evidence = weak_evidence.get(primary, [])[:8]
@@ -407,6 +533,14 @@ def score_pcap_candidates(record: dict[str, Any], rows: list[dict[str, Any]]) ->
         "rule_conflict_flags": conflict_flags,
         "evidence_strength": evidence_strength,
         "rule_evidence": rule_evidence[:12],
+        "benign_profile_score": benign_score,
+        "attack_indicator_score": profile_attack_score,
+        "payload_observability_gap": payload_observability_gap,
+        "http_body_missing_for_post": http_body_missing_for_post,
+        "post_to_dynamic_endpoint": post_to_dynamic_endpoint,
+        "uncommon_dynamic_endpoint": uncommon_dynamic_endpoint,
+        "weak_implant_candidate": weak_implant_candidate,
+        "weak_attack_uncertainty": weak_attack_uncertainty,
     }
 
 

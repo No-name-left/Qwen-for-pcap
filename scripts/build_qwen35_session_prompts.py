@@ -19,7 +19,7 @@ from qwen35_rag_utils import (
 from technique_profiles import boundary_rules_for_candidates, prompt_profile_summary
 
 
-PROMPT_VERSION = "observable_timing_boundary_rag_v4"
+PROMPT_VERSION = "observable_timing_boundary_rag_v5"
 TECHNIQUE_CODES = ["TA43_01", "TA43_02", "TA01_01", "TA01_02", "TA03_01", "TA11_01", "TA11_02", "TN01_01"]
 STAGE_CODES = ["TA43", "TA01", "TA03", "TA11", "TN01"]
 TECHNIQUE_TO_STAGE = {
@@ -75,6 +75,9 @@ OBSERVABLE_KEYS = [
     "candidate_technique_scores", "candidate_evidence", "candidate_counter_evidence",
     "candidate_weak_evidence", "primary_rule_candidate", "top_rule_candidates",
     "score_margin", "rule_conflict_flags", "evidence_strength", "rule_evidence",
+    "benign_profile_score", "attack_indicator_score", "payload_observability_gap",
+    "http_body_missing_for_post", "post_to_dynamic_endpoint", "uncommon_dynamic_endpoint",
+    "weak_implant_candidate", "weak_attack_uncertainty",
     "payload_visibility_summary", "http_context_summary", "dns_context_summary",
     "tls_context_summary", "ftp_context_summary", "scan_group_summary",
     "auth_attempt_summary", "beacon_like_summary", "suspicious_indicator_counts",
@@ -196,7 +199,10 @@ def phase1_instruction_block() -> str:
         "Classify exactly one PCAP session or behavioral group for Phase-1 scoring. Predict stage_code first; technique_guess is optional best-effort detail and never overrides stage_code.\n"
         "If record_type is pcap, you are judging the whole PCAP, not a single session: aggregate all sessions/groups, produce one stage_code for the entire PCAP, and use top_suspicious_sessions/top_payload_evidence only as representative evidence.\n"
         "If record_type is session or a behavioral group, judge only that record with same-PCAP aggregates as context.\n"
-        "candidate_technique_scores are deterministic evidence priors, not final labels. Prefer the highest-scoring candidate when evidence is strong and counter-evidence is weak. If top candidates are close, use boundary rules and RAG context. Do not classify as TN01_01 when explicit attack indicators are present. Do not choose an attack label solely from weak evidence such as a single POST or encrypted traffic. Explain both supporting evidence and key counter-evidence in reason.\n"
+        "candidate_technique_scores are deterministic evidence priors, not final labels. Prefer the highest-scoring candidate when evidence is strong and counter-evidence is weak. If top candidates are close, use boundary rules and RAG context. Do not classify as TN01_01 when explicit attack indicators are present. Do not choose an attack label solely from weak evidence such as a single POST or encrypted traffic. Explain both supporting evidence and key counter-evidence or uncertainty in reason.\n"
+        "Calibration principles: binary, encoded, compressed, or chunked content alone is not exploitation evidence; normal downloads, updates, CDN/static assets, depot/chunk transfers, and large binary responses may legitimately contain opaque bytes.\n"
+        "Calibration principles: missing POST body or payload visibility is not proof of benign behavior; treat payload_observability_gap and http_body_missing_for_post as observation limits and lower confidence rather than inventing hidden content.\n"
+        "Calibration principles: a weak dynamic POST to PHP/ASP/JSP only supports TA03/TA01 when additional upload, drop, exploit, command, webshell, or backdoor evidence is present; otherwise keep uncertainty explicit and avoid high-confidence attack labels.\n"
         "Return exactly one JSON object.\n"
         "Do not output Markdown, a Thinking Process, or explanations before or after JSON.\n"
         "The first character must be \"{\" and the last character must be \"}\".\n"
@@ -216,7 +222,7 @@ def phase1_instruction_block() -> str:
         "When evidence is ambiguous, choose the best-supported stage and lower confidence. TN01 is allowed when attack evidence remains insufficient after behavioral review.\n"
         f"Allowed stage_code values: {', '.join(STAGE_CODES)}. Allowed non-null technique_guess values: {', '.join(TECHNIQUE_CODES)}.\n"
         "Required JSON fields: record_id, pcap_id, record_type, start_time, end_time, src_ip, src_port, dst_ip, dst_port, stage_code, technique_guess, confidence, reason.\n"
-        "technique_guess may be null. confidence must be 0..1 and reason must be one short sentence grounded in observable PCAP evidence.\n"
+        "technique_guess may be null. confidence must be 0..1 and reason must be one short sentence grounded in observable PCAP evidence, including the main support and any key counter-evidence or uncertainty.\n"
     )
 
 

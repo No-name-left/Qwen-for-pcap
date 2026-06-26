@@ -245,6 +245,21 @@ def targeted_rag_metadata(record: dict[str, Any], groups: list[str]) -> tuple[li
     if benign_periodic_active(record):
         triggers.append("benign_periodic_hints=positive")
         docs.extend([TIMING_DOCS["benign_periodic"], TIMING_DOCS["callback"]])
+    if as_number(record.get("benign_profile_score")) > 0:
+        triggers.append("benign_download_profile=positive")
+        docs.extend([
+            BOUNDARY_DOCS["ta01_02_vs_tn01_01"],
+            "observable_exploit_indicator_mapping",
+            TIMING_DOCS["benign_periodic"],
+        ])
+    flags = set(record.get("rule_conflict_flags") or [])
+    if record.get("payload_observability_gap") or record.get("http_body_missing_for_post") or "weak_dynamic_post_no_payload_visibility" in flags:
+        triggers.append("weak_dynamic_post_no_body_visibility=positive")
+        docs.extend([
+            BOUNDARY_DOCS["ta01_02_vs_tn01_01"],
+            "observable_file_upload_and_implant_hints",
+            "observable_encrypted_visibility_limits",
+        ])
     if any(record.get(field) not in (None, "", [], {}) for field in (
         "ordered_event_summary", "relative_time_deltas", "scan_to_exploit_delta",
         "exploit_to_upload_delta", "upload_to_access_delta", "repeated_backdoor_access_intervals",
@@ -386,6 +401,9 @@ def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
             "candidate_technique_scores", "primary_rule_candidate", "rule_evidence",
             "top_rule_candidates", "candidate_evidence", "candidate_counter_evidence",
             "candidate_weak_evidence", "rule_conflict_flags", "evidence_strength",
+            "benign_profile_score", "attack_indicator_score", "payload_observability_gap",
+            "http_body_missing_for_post", "post_to_dynamic_endpoint", "uncommon_dynamic_endpoint",
+            "weak_implant_candidate", "weak_attack_uncertainty",
         ):
             add_term(terms, record.get(field))
         scan_summary = record.get("scan_group_summary") or {}
@@ -406,6 +424,12 @@ def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
         if record.get("top_payload_evidence"):
             terms.extend(["PCAP payload evidence", "exploit upload backdoor boundary", "TA01_02 TA03_01 TA11_01"])
             rules.append("pcap_payload_evidence")
+        if as_number(record.get("benign_profile_score")) > 0:
+            terms.extend(["benign download update CDN static depot chunk profile", "binary chunk alone is not exploitation", "TN01_01 TA01_02 boundary"])
+            rules.append("benign_download_profile:TN01_01_counter")
+        if record.get("payload_observability_gap") or record.get("http_body_missing_for_post"):
+            terms.extend(["payload observability gap", "missing HTTP body is not benign proof", "weak dynamic POST no body visibility", "TA03_01 TA01_02 TN01_01 boundary"])
+            rules.append("weak_dynamic_post_no_payload_visibility")
     for field in (
         "time_span", "inter_arrival_summary", "inter_attempt_intervals", "interval_summary",
         "attempt_rate", "probe_rate", "burstiness_score", "periodicity_score", "regularity_score",

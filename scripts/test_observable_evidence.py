@@ -149,7 +149,7 @@ def main() -> int:
     }.issubset(set(all_docs))
 
     prompt, meta = build_prompt(record, "technique", None, load_runtime_profile("dry_run_mock"))
-    assert PROMPT_VERSION == "observable_timing_boundary_rag_v4"
+    assert PROMPT_VERSION == "observable_timing_boundary_rag_v5"
     assert "OBSERVABLE_EVIDENCE_FROM_PCAP:" in prompt and "xp_cmdshell" in prompt
     assert "packet_rate" in prompt and "duration" in meta["timing_fields_included"]
     assert meta["estimated_prompt_tokens"] <= 3400

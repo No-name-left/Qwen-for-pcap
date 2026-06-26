@@ -53,7 +53,7 @@ def main() -> int:
     assert meta["estimated_prompt_tokens"] <= int(profile["max_prompt_tokens"])
     assert meta["prompt_version"] == PROMPT_VERSION
     assert meta["targeted_boundary_doc_ids"]
-    assert "PROMPT_VERSION: observable_timing_boundary_rag_v4" in prompt
+    assert f"PROMPT_VERSION: {PROMPT_VERSION}" in prompt
     assert "OBSERVABLE_EVIDENCE_FROM_PCAP:" in prompt
     assert "xp_cmdshell" in prompt
     assert "CLASSIFICATION_RECORD:" in prompt
