@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from qwen35_rag_utils import ROOT, load_json
+from technique_profiles import boundary_doc_ids_for_candidates, profile_terms
 
 
 BOUNDARY_DOCS = {
@@ -150,6 +151,14 @@ def targeted_rag_metadata(record: dict[str, Any], groups: list[str]) -> tuple[li
     used = indicator_fields_used(record)
     triggers: list[str] = []
     docs: list[str] = []
+    top_candidates = [
+        str(item.get("technique"))
+        for item in record.get("top_rule_candidates") or []
+        if isinstance(item, dict) and item.get("technique")
+    ]
+    if top_candidates:
+        triggers.append("top_rule_candidates=positive")
+        docs.extend(boundary_doc_ids_for_candidates(top_candidates[:3]))
     for field in used:
         if field == "payload_visibility":
             triggers.append("payload_visibility=encrypted_tls")
@@ -364,11 +373,19 @@ def record_terms(record: dict[str, Any]) -> tuple[list[str], list[str], bool]:
     add_term(terms, record.get("suspicious_uri_patterns"))
     if record_type == "pcap":
         terms.extend(["whole PCAP", "aggregate sessions", "one stage per pcap", "representative suspicious sessions"])
+        top_candidates = [
+            str(item.get("technique"))
+            for item in record.get("top_rule_candidates") or []
+            if isinstance(item, dict) and item.get("technique")
+        ]
+        add_term(terms, profile_terms(top_candidates[:3]))
         for field in (
             "payload_visibility_summary", "http_context_summary", "dns_context_summary",
             "tls_context_summary", "ftp_context_summary", "top_suspicious_sessions",
             "top_payload_evidence", "suspicious_indicator_counts",
             "candidate_technique_scores", "primary_rule_candidate", "rule_evidence",
+            "top_rule_candidates", "candidate_evidence", "candidate_counter_evidence",
+            "candidate_weak_evidence", "rule_conflict_flags", "evidence_strength",
         ):
             add_term(terms, record.get(field))
         scan_summary = record.get("scan_group_summary") or {}

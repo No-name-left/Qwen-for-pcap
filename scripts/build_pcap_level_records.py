@@ -10,6 +10,7 @@ from typing import Any, Iterable
 
 from qwen35_rag_utils import ROOT, load_json, write_json
 from session_card_indicators import redact_sensitive_text
+from technique_profiles import technique_codes, validate_profiles
 
 
 INDICATOR_FIELDS = [
@@ -28,13 +29,20 @@ PAYLOAD_FIELDS = [
     "suspicious_uri_patterns",
     "http_upload_hints",
 ]
-TECHNIQUE_CODES = ["TA43_01", "TA43_02", "TA01_01", "TA01_02", "TA03_01", "TA11_01", "TA11_02", "TN01_01"]
+TECHNIQUE_CODES = technique_codes()
 AUTH_SERVICE_PORTS = {21, 22, 23, 25, 110, 143, 389, 445, 1433, 1521, 3306, 3389, 5432, 5900, 6379, 9200}
 FAILED_STATES = {"S0", "REJ", "RSTOS0", "RSTRH", "SH", "SHR"}
 SENSITIVE_PATH_RE = re.compile(
     r"(?i)(?:/app_data/|/db\.mdb\b|\.mdb\b|/\.env\b|/config(?:\.php)?\b|/backup\b|/database\b|/db/|/admin\b|/phpinfo\.php\b|/\.git/|/web-inf/|/server-status\b)"
 )
 MINER_RE = re.compile(r"(?i)(?:/miner/ping\b|\bminer\b|\bhashrate\b|\bethminer\b|\bmining\b|\bworker\b|\brig\b|heartbeat[-_ ]?like ping)")
+BENIGN_UPDATE_RE = re.compile(
+    r"(?i)(?:steam|valve|depot|chunk|application/x-steam-chunk|cdn|static|assets|"
+    r"update|updater|download|patch|manifest|\.css\b|\.js\b|\.png\b|\.jpe?g\b|\.gif\b|\.ico\b|ocsp|crl|ntp)"
+)
+WEBSHELL_ENDPOINT_RE = re.compile(r"(?i)/(?:shell|cmd|webshell|chopper|c99|r57)\.(?:php|jsp|jspx|asp|aspx)\b")
+COMMAND_INTENT_RE = re.compile(r"(?i)(?:[?&](?:cmd|command|exec|action)=|(?:whoami|ipconfig|ifconfig|uname|id)(?:\b|%))")
+GENERIC_PHP_POST_RE = re.compile(r"(?i)(?:\bPOST\b|\"POST\"|http_methods.*post).{0,160}/[^/?#]{1,80}\.php\b")
 FILE_PLACEMENT_RE = re.compile(
     r"(?i)(?:multipart/form-data|\bfilename\s*=|/(?:upload|uploads|plugin/install|admin/upload)\b|"
     r"\.(?:php|jsp|jspx|asp|aspx|war|exe|dll|elf|sh|py)(?:$|[?&#/])|"
@@ -216,20 +224,32 @@ def strong_file_placement_active(record: dict[str, Any], blob: str) -> bool:
     )
 
 
+def benign_update_active(blob: str, rows: list[dict[str, Any]]) -> bool:
+    return bool(BENIGN_UPDATE_RE.search(blob) or BENIGN_UPDATE_RE.search(evidence_blob(rows)))
+
+
+def webshell_access_active(blob: str) -> bool:
+    return bool(WEBSHELL_ENDPOINT_RE.search(blob) and COMMAND_INTENT_RE.search(blob))
+
+
 def score_pcap_candidates(record: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    validate_profiles()
     scores = {code: 0.0 for code in TECHNIQUE_CODES}
-    scores["TN01_01"] = 0.5
-    rule_evidence: list[str] = []
+    candidate_evidence: dict[str, list[str]] = {code: [] for code in TECHNIQUE_CODES}
+    candidate_counter_evidence: dict[str, list[str]] = {code: [] for code in TECHNIQUE_CODES}
+    weak_evidence: dict[str, list[str]] = {code: [] for code in TECHNIQUE_CODES}
 
-    def add(code: str, amount: float, reason: str) -> None:
+    def note(target: dict[str, list[str]], code: str, reason: str) -> None:
+        if reason not in target[code]:
+            target[code].append(reason)
+
+    def add(code: str, amount: float, reason: str, *, weak: bool = False) -> None:
         scores[code] += amount
-        if reason not in rule_evidence:
-            rule_evidence.append(reason)
+        note(weak_evidence if weak else candidate_evidence, code, reason)
 
-    def subtract(code: str, amount: float, reason: str) -> None:
+    def counter(code: str, amount: float, reason: str) -> None:
         scores[code] -= amount
-        if reason not in rule_evidence:
-            rule_evidence.append(reason)
+        note(candidate_counter_evidence, code, reason)
 
     counts = record.get("suspicious_indicator_counts") or {}
     payload_summary = record.get("payload_visibility_summary") or {}
@@ -243,77 +263,149 @@ def score_pcap_candidates(record: dict[str, Any], rows: list[dict[str, Any]]) ->
         record.get("http_upload_hints"), record.get("transferred_files_summary"), rows,
     )
 
-    attack_signal = False
+    explicit_attack = False
+    weak_attack = False
+    benign_context = benign_update_active(blob, rows)
+    repeated_auth = repeated_auth_service_active(record, rows)
+    file_placement = strong_file_placement_active(record, blob)
+    webshell_access = webshell_access_active(blob)
+    generic_php_post = bool(GENERIC_PHP_POST_RE.search(blob))
+    sensitive_path = bool(SENSITIVE_PATH_RE.search(blob))
+    miner_heartbeat = bool(MINER_RE.search(blob))
+
     if as_count(scan_summary.get("max_unique_dst_ports")) >= 8 or as_count(scan_summary.get("scan_like_record_count")) > 0:
         add("TA43_01", 3.5, "scan_group_summary shows port/target fanout")
-        attack_signal = True
+        explicit_attack = True
         if as_count(scan_summary.get("max_failed_conn_rate")) >= 0.4:
             add("TA43_01", 0.8, "scan_group_summary high failed connection rate")
+        if as_count(counts.get("vuln_scan_indicators")) > 0 or sensitive_path:
+            counter("TA43_01", 1.2, "application-layer probe evidence favors TA43_02 over pure port scan")
     if as_count(counts.get("vuln_scan_indicators")) > 0:
         add("TA43_02", 3.0, "vuln_scan_indicators > 0")
-        attack_signal = True
-    if SENSITIVE_PATH_RE.search(blob):
+        explicit_attack = True
+        counter("TA01_02", 0.8, "scanner-style URI/path evidence can be vulnerability discovery rather than exploitation")
+    if sensitive_path:
         add("TA43_02", 4.5, "sensitive-path vulnerability probe observed")
-        subtract("TN01_01", 1.0, "TN01_01 penalty: sensitive-path probe is not ordinary business traffic")
-        attack_signal = True
+        counter("TN01_01", 1.0, "sensitive-path probe is not ordinary business traffic")
+        explicit_attack = True
 
     exploit_count = as_count(counts.get("exploit_indicators"))
     suspicious_payload_count = as_count(payload_summary.get("suspicious_payload_record_count")) + len(record.get("top_payload_evidence") or [])
     if exploit_count > 0:
         add("TA01_02", 3.2, "exploit_indicators > 0")
-        attack_signal = True
+        explicit_attack = True
     if exploit_count > 0 and suspicious_payload_count > 0:
         add("TA01_02", 3.2, "exploit_indicators > 0 and suspicious_payload_record_count > 0")
-        subtract("TN01_01", 2.0, "TN01_01 penalty: explicit exploit/payload indicators present")
-        attack_signal = True
+        counter("TN01_01", 2.0, "explicit exploit/payload indicators present")
+        explicit_attack = True
+    elif suspicious_payload_count > 0:
+        add("TA01_02", 0.7, "suspicious or encoded payload evidence without exploit indicator", weak=True)
+        weak_attack = True
+    if webshell_access:
+        add("TA11_01", 5.0, "webshell-like endpoint plus command parameter or interactive command intent")
+        counter("TA01_02", 1.8, "webshell endpoint suggests existing backdoor access rather than initial exploitation")
+        explicit_attack = True
+    elif exploit_count > 0:
+        counter("TA11_01", 0.6, "exploit indicator lacks clear existing backdoor endpoint")
 
     if as_count(counts.get("auth_indicators")) > 0 or as_count(auth_summary.get("failed_login_count")) > 0 or as_count(auth_summary.get("max_attempt_count")) >= 5:
         add("TA01_01", 3.2, "auth brute-force indicators or repeated failures observed")
-        attack_signal = True
-    if repeated_auth_service_active(record, rows):
+        explicit_attack = True
+    if repeated_auth:
         add("TA01_01", 5.0, "repeated short connections to authentication service port")
-        subtract("TA11_02", 2.5, "TA11_02 penalty: authentication service repetition fits brute force better than C2")
-        attack_signal = True
+        counter("TA11_02", 3.5, "authentication service repetition fits brute force better than C2")
+        counter("TA43_01", 1.2, "single authentication service repetition is not broad port discovery")
+        explicit_attack = True
 
     implant_count = as_count(counts.get("implant_indicators"))
-    file_placement = strong_file_placement_active(record, blob)
     if implant_count > 0 and file_placement:
         add("TA03_01", 4.6, "implant/upload indicators with clear file placement evidence")
-        attack_signal = True
+        counter("TA01_02", 1.0, "file placement evidence favors implant placement over generic exploitation")
+        explicit_attack = True
     elif implant_count > 0:
         add("TA03_01", 1.0, "implant_indicators present but file placement evidence is weak")
         if exploit_count > 0 or suspicious_payload_count > 0:
             add("TA01_02", 2.0, "generic exploit POST/payload without clear file placement favors TA01_02 over TA03_01")
-        attack_signal = True
+            counter("TA03_01", 1.0, "generic exploit POST without file placement is weak implant evidence")
+        weak_attack = True
+    elif generic_php_post:
+        add("TA03_01", 0.6, "POST to PHP endpoint without body/file evidence is weak implant evidence", weak=True)
+        counter("TA03_01", 0.4, "no upload, filename, script payload, or file placement evidence")
+        weak_attack = True
 
     if as_count(counts.get("backdoor_access_indicators")) > 0:
         add("TA11_01", 3.8, "backdoor_access_indicators > 0")
-        attack_signal = True
+        explicit_attack = True
 
     c2_count = as_count(counts.get("c2_indicators"))
     beacon_count = as_count(beacon_summary.get("beacon_like_record_count"))
-    if c2_count > 0:
+    if c2_count > 0 and not repeated_auth:
         add("TA11_02", 2.6, "c2_indicators > 0")
-        attack_signal = True
-    if c2_count > 0 and beacon_count > 0:
+        explicit_attack = True
+    elif c2_count > 0 and repeated_auth:
+        add("TA11_02", 0.8, "c2-like repetition on auth service is weak C2 evidence", weak=True)
+        counter("TA11_02", 2.0, "authentication service port repetition is counter-evidence for callback/C2")
+    if c2_count > 0 and beacon_count > 0 and not repeated_auth:
         add("TA11_02", 4.0, "c2_indicators > 0 and beacon_like_record_count > 0")
-        subtract("TN01_01", 2.0, "TN01_01 penalty: beacon/C2 indicators present")
-        attack_signal = True
+        counter("TN01_01", 2.0, "beacon/C2 indicators present")
+        explicit_attack = True
     if as_count(payload_summary.get("encrypted_records")) > 0 and beacon_count > 0:
-        add("TA11_02", 1.2, "encrypted endpoint-fixed or beacon-like repeated sessions")
-    if MINER_RE.search(blob):
+        add("TA11_02", 1.2, "encrypted endpoint-fixed or beacon-like repeated sessions", weak=repeated_auth)
+    if miner_heartbeat:
         add("TA11_02", 5.0, "miner/hashrate/ethminer heartbeat-like callback observed")
-        subtract("TN01_01", 1.5, "TN01_01 penalty: miner heartbeat is not ordinary business traffic")
-        attack_signal = True
+        counter("TN01_01", 1.5, "miner heartbeat is not ordinary business traffic")
+        explicit_attack = True
 
-    if not attack_signal:
-        add("TN01_01", 2.0, "no strong attack indicator in PCAP-level aggregate")
+    if benign_context:
+        if explicit_attack:
+            counter("TA01_02", 1.0, "benign update/download/chunk context may explain encoded or binary content")
+            counter("TA11_02", 1.0, "benign update/download/chunk context counters beacon interpretation")
+            note(candidate_counter_evidence, "TN01_01", "benign context exists but explicit attack indicators are present")
+        else:
+            add("TN01_01", 3.5, "benign software/update/download/static/chunk traffic and no strong attack indicator")
+            counter("TA01_02", 1.4, "download/chunk traffic can contain binary or encoded body without exploitation")
+            counter("TA11_02", 1.2, "update/download/chunk traffic is common C2 false positive")
+    if not explicit_attack:
+        if weak_attack:
+            add("TN01_01", 0.8, "only weak attack evidence is visible")
+            note(candidate_counter_evidence, "TN01_01", "weak suspicious evidence requires LLM boundary review")
+        else:
+            add("TN01_01", 2.2, "no meaningful attack indicator in PCAP-level aggregate")
+
     for code in scores:
-        scores[code] = round(max(0.0, scores[code]), 3)
-    primary = sorted(scores.items(), key=lambda item: (-item[1], TECHNIQUE_CODES.index(item[0])))[0][0]
+        scores[code] = round(min(10.0, max(0.0, scores[code])), 3)
+    top = sorted(scores.items(), key=lambda item: (-item[1], TECHNIQUE_CODES.index(item[0])))
+    primary = top[0][0]
+    top_rule_candidates = [{"technique": code, "score": score} for code, score in top[:3]]
+    score_margin = round(top[0][1] - top[1][1], 3) if len(top) > 1 else round(top[0][1], 3)
+    primary_score = top[0][1]
+    evidence_strength = "strong" if primary_score >= 6 and score_margin >= 2 else "medium" if primary_score >= 3 or score_margin >= 1 else "weak"
+    conflict_flags: list[str] = []
+    if score_margin < 1.5:
+        conflict_flags.append("low_score_margin")
+    if evidence_strength == "weak":
+        conflict_flags.append("weak_evidence")
+    if explicit_attack and primary == "TN01_01":
+        conflict_flags.append("attack_indicators_vs_normal_candidate")
+    if benign_context and primary != "TN01_01" and not explicit_attack:
+        conflict_flags.append("benign_context_vs_attack_candidate")
+    if repeated_auth and scores.get("TA11_02", 0) > 0:
+        conflict_flags.append("auth_service_repetition_counters_c2")
+    if generic_php_post and not file_placement:
+        conflict_flags.append("generic_php_post_weak_implant_evidence")
+    rule_evidence = candidate_evidence.get(primary, [])[:8]
+    if not rule_evidence:
+        rule_evidence = weak_evidence.get(primary, [])[:8]
     return {
         "candidate_technique_scores": scores,
+        "candidate_evidence": {code: values for code, values in candidate_evidence.items() if values},
+        "candidate_counter_evidence": {code: values for code, values in candidate_counter_evidence.items() if values},
+        "candidate_weak_evidence": {code: values for code, values in weak_evidence.items() if values},
         "primary_rule_candidate": primary,
+        "top_rule_candidates": top_rule_candidates,
+        "score_margin": score_margin,
+        "rule_conflict_flags": conflict_flags,
+        "evidence_strength": evidence_strength,
         "rule_evidence": rule_evidence[:12],
     }
 

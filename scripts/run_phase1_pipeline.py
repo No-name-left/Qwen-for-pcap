@@ -35,6 +35,12 @@ CSV_FIELDS = [
     "开始时间", "结束时间", "源IP", "源端口", "目的IP", "目的端口",
     STAGE_FIELD, "stage_code", "technique_guess", "confidence", REASON_FIELD, "reason",
 ]
+CANDIDATE_SCORE_FIELDS = [
+    "pcap_name", "pcap_id", "record_id", "record_type",
+    "primary_rule_candidate", "top_rule_candidates", "score_margin", "evidence_strength",
+    "predicted_technique", "predicted_stage", "confidence",
+    "conflict_review_needed", "conflict_flags", "rule_evidence", "counter_evidence",
+]
 PCAP_SUFFIXES = {".pcap", ".pcapng", ".cap"}
 
 
@@ -143,6 +149,8 @@ def effective_config(args: argparse.Namespace) -> dict[str, Any]:
         "zeek_docker_image": config_value(data, args, "zeek_docker_image", ["PHASE1_ZEEK_DOCKER_IMAGE", "ZEEK_DOCKER_IMAGE"]),
         "save_prompt_samples": config_value(data, args, "save_prompt_samples", ["PHASE1_SAVE_PROMPT_SAMPLES"], as_bool),
         "prompt_sample_limit": config_value(data, args, "prompt_sample_limit", ["PHASE1_PROMPT_SAMPLE_LIMIT"], int),
+        "enable_critic": config_value(data, args, "enable_critic", ["PHASE1_ENABLE_CRITIC"], as_bool),
+        "critic_only_on_conflict": config_value(data, args, "critic_only_on_conflict", ["PHASE1_CRITIC_ONLY_ON_CONFLICT"], as_bool),
     }
     if values["enable_thinking"] is None:
         values["enable_thinking"] = False
@@ -155,6 +163,10 @@ def effective_config(args: argparse.Namespace) -> dict[str, Any]:
     if values["granularity"] is None:
         values["granularity"] = "pcap"
     values["granularity"] = str(values["granularity"]).strip().lower()
+    if values["enable_critic"] is None:
+        values["enable_critic"] = False
+    if values["critic_only_on_conflict"] is None:
+        values["critic_only_on_conflict"] = True
     values["input_dir"] = Path(values["input_dir"]).expanduser().resolve()
     values["output_dir"] = Path(values["output_dir"]).expanduser().resolve()
     values["answer"] = Path(values["answer"]).expanduser().resolve() if values.get("answer") else None
@@ -188,6 +200,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--zeek-docker-image", help="Local Docker Zeek image used when system Zeek is unavailable or fails.")
     parser.add_argument("--save-prompt-samples", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--prompt-sample-limit", type=int)
+    parser.add_argument("--enable-critic", dest="enable_critic", action="store_true", default=None, help="Generate lightweight conflict-review prompts for PCAP-level predictions.")
+    parser.add_argument("--disable-critic", dest="enable_critic", action="store_false", default=None, help="Disable conflict-review prompt generation.")
+    parser.add_argument("--critic-only-on-conflict", action=argparse.BooleanOptionalAction, default=None, help="Only generate critic review prompts for conflict cases.")
     parser.add_argument("--allow-remote-base-url", action="store_true", help="Explicitly allow a non-loopback OpenAI-compatible endpoint.")
     return parser.parse_args()
 
@@ -241,6 +256,10 @@ def step_paths(output: Path) -> dict[str, Path]:
         "prompt_manifest": output / "prompts/prompt_manifest.json",
         "prompt_samples": output / "prompt_samples",
         "api_parsed": output / "api/parsed",
+        "candidate_scores": output / "candidate_scores.csv",
+        "candidate_score_report": output / "candidate_score_report.md",
+        "conflict_cases": output / "conflict_cases.jsonl",
+        "critic_prompts": output / "critic_review_prompts",
     }
 
 
@@ -586,6 +605,129 @@ def official_rows(results: list[dict[str, Any]], record_to_pcap: dict[str, str])
     return rows
 
 
+def json_cell(value: Any) -> str:
+    if value in (None, "", [], {}):
+        return ""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def write_candidate_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=CANDIDATE_SCORE_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def prediction_technique(result: dict[str, Any] | None) -> str:
+    if not result:
+        return ""
+    return str(result.get("technique_guess") or "").upper()
+
+
+def candidate_conflict_flags(record: dict[str, Any], result: dict[str, Any] | None) -> list[str]:
+    flags = list(record.get("rule_conflict_flags") or [])
+    predicted = prediction_technique(result)
+    predicted_stage = str((result or {}).get("stage_code") or stage_from_technique(predicted)).upper()
+    primary = str(record.get("primary_rule_candidate") or "")
+    scores = record.get("candidate_technique_scores") or {}
+    attack_scores = [float(score or 0) for code, score in scores.items() if code != "TN01_01"]
+    max_attack = max(attack_scores or [0.0])
+    if result:
+        if predicted and primary and predicted != primary:
+            flags.append("model_prediction_differs_from_primary_rule_candidate")
+        if predicted == "TN01_01" or predicted_stage == "TN01":
+            if max_attack >= 3.0 and str(record.get("evidence_strength")) != "weak":
+                flags.append("predicted_normal_with_attack_candidate")
+        elif any("benign" in str(item).lower() or "download/chunk" in str(item).lower() for item in (record.get("candidate_counter_evidence") or {}).get(predicted, [])):
+            flags.append("predicted_attack_with_benign_counter_evidence")
+    return sorted(set(flags))
+
+
+def build_critic_prompt(record: dict[str, Any], result: dict[str, Any] | None, flags: list[str]) -> str:
+    payload = {
+        "record_id": record.get("record_id"),
+        "pcap_id": record.get("pcap_id"),
+        "pcap_name": record.get("pcap_name") or record.get("pcap"),
+        "primary_model_output": result or {},
+        "top_rule_candidates": record.get("top_rule_candidates"),
+        "candidate_evidence": record.get("candidate_evidence"),
+        "candidate_counter_evidence": record.get("candidate_counter_evidence"),
+        "candidate_weak_evidence": record.get("candidate_weak_evidence"),
+        "rule_conflict_flags": flags,
+    }
+    return (
+        "Review this Phase-1 PCAP-level classification conflict. Keep the model output unless the rule evidence and boundary logic clearly justify a revision.\n"
+        "Return exactly one JSON object with keep_or_revise, final_technique_guess, final_stage_code, confidence, reason.\n"
+        + json.dumps(payload, ensure_ascii=False, indent=2)
+        + "\n"
+    )
+
+
+def write_candidate_diagnostics(
+    config: dict[str, Any],
+    paths: dict[str, Path],
+    records: list[dict[str, Any]],
+    results: list[dict[str, Any]],
+    record_to_pcap: dict[str, str],
+) -> dict[str, int]:
+    result_by_id = {str(item.get("record_id")): item for item in results}
+    rows: list[dict[str, Any]] = []
+    conflict_rows: list[dict[str, Any]] = []
+    if config.get("enable_critic"):
+        paths["critic_prompts"].mkdir(parents=True, exist_ok=True)
+        for old in paths["critic_prompts"].glob("*.txt"):
+            old.unlink()
+    for index, record in enumerate(records, start=1):
+        record_id = str(record.get("record_id") or record.get("session_id") or "")
+        result = result_by_id.get(record_id)
+        predicted = prediction_technique(result)
+        predicted_stage = str((result or {}).get("stage_code") or stage_from_technique(predicted)).upper()
+        flags = candidate_conflict_flags(record, result)
+        review_needed = bool(flags) and (bool(result) or config.get("enable_critic"))
+        row = {
+            "pcap_name": record_to_pcap.get(record_id, record.get("pcap_name") or record.get("pcap") or ""),
+            "pcap_id": record.get("pcap_id") or "",
+            "record_id": record_id,
+            "record_type": record.get("record_type") or "",
+            "primary_rule_candidate": record.get("primary_rule_candidate") or "",
+            "top_rule_candidates": json_cell(record.get("top_rule_candidates")),
+            "score_margin": record.get("score_margin"),
+            "evidence_strength": record.get("evidence_strength") or "",
+            "predicted_technique": predicted,
+            "predicted_stage": predicted_stage,
+            "confidence": (result or {}).get("confidence"),
+            "conflict_review_needed": str(review_needed).lower(),
+            "conflict_flags": json_cell(flags),
+            "rule_evidence": json_cell(record.get("rule_evidence") or record.get("candidate_evidence")),
+            "counter_evidence": json_cell(record.get("candidate_counter_evidence")),
+        }
+        rows.append(row)
+        if review_needed:
+            conflict = {**row, "primary_model_output": result or {}}
+            conflict_rows.append(conflict)
+            if config.get("enable_critic") and (not config.get("critic_only_on_conflict") or flags):
+                prompt_path = paths["critic_prompts"] / f"{index:06d}_{hashlib.sha256(record_id.encode()).hexdigest()[:10]}.txt"
+                prompt_path.write_text(build_critic_prompt(record, result, flags), encoding="utf-8")
+    write_candidate_csv(paths["candidate_scores"], rows)
+    write_jsonl(paths["conflict_cases"], conflict_rows)
+    lines = [
+        "# Candidate Score Report", "",
+        f"- Records: {len(records)}",
+        f"- Candidate rows: {len(rows)}",
+        f"- Conflict review needed: {len(conflict_rows)}",
+        f"- Critic prompt generation enabled: `{str(config.get('enable_critic')).lower()}`",
+        "",
+        "## Notes", "",
+        "- Scores are deterministic evidence priors, not final labels.",
+        "- Counter-evidence is preserved to support boundary review and reduce false positives.",
+        "- `conflict_cases.jsonl` contains rows where score margin, weak evidence, benign counters, or model/rule disagreement deserve review.",
+        "",
+    ]
+    paths["candidate_score_report"].write_text("\n".join(lines), encoding="utf-8")
+    return {"candidate_rows": len(rows), "conflict_cases": len(conflict_rows)}
+
+
 def safe_config_report(config: dict[str, Any]) -> dict[str, Any]:
     parsed_url = urlparse(config["base_url"])
     safe_netloc = parsed_url.hostname or ""
@@ -603,7 +745,9 @@ def safe_config_report(config: dict[str, Any]) -> dict[str, Any]:
         "prefer_zeek": config["prefer_zeek"], "allow_tshark_fallback": config["allow_tshark_fallback"],
         "enable_tshark_observable_supplement": config["enable_tshark_observable_supplement"],
         "zeek_docker_image": config.get("zeek_docker_image"),
-        "save_prompt_samples": config["save_prompt_samples"], "prompt_sample_limit": config["prompt_sample_limit"], "prompt_version": PROMPT_VERSION,
+        "save_prompt_samples": config["save_prompt_samples"], "prompt_sample_limit": config["prompt_sample_limit"],
+        "enable_critic": config.get("enable_critic", False), "critic_only_on_conflict": config.get("critic_only_on_conflict", True),
+        "prompt_version": PROMPT_VERSION,
     }
 
 
@@ -619,12 +763,16 @@ def write_summary(config: dict[str, Any], paths: dict[str, Path], stats: dict[st
         f"- PCAP-level records: {stats.get('pcap_level_records', 0)}",
         f"- Classification records selected for prompting: {stats.get('records', 0)}",
         f"- Prompts built: {stats.get('prompts', 0)}", f"- Predictions: {stats.get('predictions', 0)}",
+        f"- Candidate score rows: {stats.get('candidate_rows', 0)}", f"- Conflict cases: {stats.get('conflict_cases', 0)}",
         f"- Failed records: {stats.get('failures', 0)}", f"- API requests attempted: {stats.get('api_calls', 0)}",
         f"- Prompt profile: `{PROMPT_VERSION}`", f"- Maximum estimated prompt tokens: {stats.get('max_prompt_tokens', 0)} / {config['max_prompt_tokens']}",
         f"- Prompts with RAG context: {stats.get('prompts_with_rag', 0)}", "",
         "## Model request controls", "",
         f"- enable_thinking: `{str(config['enable_thinking']).lower()}`",
         "- thinking_control: `chat_template_kwargs.enable_thinking`", "",
+        "## Critic controls", "",
+        f"- enable_critic: `{str(config.get('enable_critic', False)).lower()}`",
+        f"- critic_only_on_conflict: `{str(config.get('critic_only_on_conflict', True)).lower()}`", "",
         "## Parser controls", "",
         f"- prefer_zeek: `{str(config['prefer_zeek']).lower()}`",
         f"- allow_tshark_fallback: `{str(config['allow_tshark_fallback']).lower()}`",
@@ -636,7 +784,8 @@ def write_summary(config: dict[str, Any], paths: dict[str, Path], stats: dict[st
         "- API credentials are omitted from logs and generated configuration reports.", "",
         "## Primary outputs", "",
         "- `phase1_predictions.csv`", "- `predictions.jsonl`", "- `failed_records.jsonl`",
-        "- `parse_errors.jsonl`", "- `prompt_samples/`", "- `prompts/prompt_manifest.json`", "",
+        "- `parse_errors.jsonl`", "- `candidate_scores.csv`", "- `candidate_score_report.md`",
+        "- `conflict_cases.jsonl`", "- `prompt_samples/`", "- `prompts/prompt_manifest.json`", "",
     ]
     if config["dry_run"]:
         lines.extend(["Dry-run stopped before API initialization. Prediction files contain no fabricated rows.", ""])
@@ -657,6 +806,7 @@ def main() -> int:
         "pcaps": len(pcaps), "records": 0, "source_session_cards": 0,
         "source_classification_records": 0, "pcap_level_records": 0,
         "prompts": 0, "predictions": 0, "failures": 0, "api_calls": 0,
+        "candidate_rows": 0, "conflict_cases": 0,
     }
     try:
         records, _, record_to_pcap, evidence_stats = prepare_evidence(config, paths, pcaps)
@@ -677,7 +827,9 @@ def main() -> int:
         write_jsonl(output / "predictions.jsonl", results)
         write_jsonl(output / "failed_records.jsonl", failures)
         write_csv(output / "phase1_predictions.csv", official_rows(results, record_to_pcap))
+        stats.update(write_candidate_diagnostics(config, paths, records, results, record_to_pcap))
         state["steps"]["api"] = "skipped_dry_run" if config["dry_run"] else "complete"
+        state["steps"]["candidate_diagnostics"] = "complete"
         state["steps"]["export"] = "complete"
         if config.get("answer") and not config["dry_run"]:
             run_command("evaluate predictions after inference", [

@@ -16,6 +16,7 @@ from qwen35_rag_utils import (
     load_json,
     load_runtime_profile,
 )
+from technique_profiles import boundary_rules_for_candidates, prompt_profile_summary
 
 
 PROMPT_VERSION = "observable_timing_boundary_rag_v4"
@@ -71,7 +72,9 @@ OBSERVABLE_KEYS = [
     "exploit_indicators", "vuln_scan_indicators", "auth_indicators",
     "implant_indicators", "backdoor_access_indicators", "c2_indicators",
     "transferred_files_summary", "dns_summary", "tls_summary", "pcap_summary", "evidence_limits",
-    "candidate_technique_scores", "primary_rule_candidate", "rule_evidence",
+    "candidate_technique_scores", "candidate_evidence", "candidate_counter_evidence",
+    "candidate_weak_evidence", "primary_rule_candidate", "top_rule_candidates",
+    "score_margin", "rule_conflict_flags", "evidence_strength", "rule_evidence",
     "payload_visibility_summary", "http_context_summary", "dns_context_summary",
     "tls_context_summary", "ftp_context_summary", "scan_group_summary",
     "auth_attempt_summary", "beacon_like_summary", "suspicious_indicator_counts",
@@ -193,7 +196,7 @@ def phase1_instruction_block() -> str:
         "Classify exactly one PCAP session or behavioral group for Phase-1 scoring. Predict stage_code first; technique_guess is optional best-effort detail and never overrides stage_code.\n"
         "If record_type is pcap, you are judging the whole PCAP, not a single session: aggregate all sessions/groups, produce one stage_code for the entire PCAP, and use top_suspicious_sessions/top_payload_evidence only as representative evidence.\n"
         "If record_type is session or a behavioral group, judge only that record with same-PCAP aggregates as context.\n"
-        "candidate_technique_scores are deterministic evidence priors. Prefer the highest-scoring candidate unless there is clear contradictory evidence. Do not classify as TN01_01 if the PCAP contains explicit attack indicators such as exploit indicators, auth brute-force indicators, beacon/C2 indicators, sensitive-path vulnerability probes, or implant/upload indicators.\n"
+        "candidate_technique_scores are deterministic evidence priors, not final labels. Prefer the highest-scoring candidate when evidence is strong and counter-evidence is weak. If top candidates are close, use boundary rules and RAG context. Do not classify as TN01_01 when explicit attack indicators are present. Do not choose an attack label solely from weak evidence such as a single POST or encrypted traffic. Explain both supporting evidence and key counter-evidence in reason.\n"
         "Return exactly one JSON object.\n"
         "Do not output Markdown, a Thinking Process, or explanations before or after JSON.\n"
         "The first character must be \"{\" and the last character must be \"}\".\n"
@@ -236,6 +239,36 @@ def rag_section(snippets: list[dict[str, Any]], profile: dict[str, Any]) -> tupl
     }
 
 
+def candidate_decision_section(record: dict[str, Any]) -> str:
+    if record.get("record_type") != "pcap":
+        return ""
+    candidates = [
+        str(item.get("technique"))
+        for item in record.get("top_rule_candidates") or []
+        if isinstance(item, dict) and item.get("technique")
+    ]
+    if not candidates and record.get("primary_rule_candidate"):
+        candidates = [str(record["primary_rule_candidate"])]
+    if not candidates:
+        return ""
+    payload = {
+        "top_rule_candidates": record.get("top_rule_candidates"),
+        "score_margin": record.get("score_margin"),
+        "evidence_strength": record.get("evidence_strength"),
+        "rule_conflict_flags": record.get("rule_conflict_flags"),
+        "candidate_evidence": record.get("candidate_evidence"),
+        "candidate_counter_evidence": record.get("candidate_counter_evidence"),
+        "candidate_weak_evidence": record.get("candidate_weak_evidence"),
+        "technique_profiles": prompt_profile_summary(candidates),
+        "boundary_rules": [
+            {"id": rule["id"], "text": rule["text"]}
+            for rule in boundary_rules_for_candidates(candidates, limit=5)
+        ],
+    }
+    compact = trim_value(payload, 1800, list_limit=4)
+    return "CANDIDATE_DECISION_CONTEXT:\n" + json.dumps(compact, ensure_ascii=False, separators=(",", ":")) + "\n"
+
+
 def _build_budgeted_prompt(
     record: dict[str, Any],
     snippets: list[dict[str, Any]] | None,
@@ -252,9 +285,10 @@ def _build_budgeted_prompt(
     core_json = json.dumps(core, ensure_ascii=False, separators=(",", ":"))
     observable = compact_observable(record, max(600, session_limit - len(core_json)))
     observable_json = json.dumps(observable, ensure_ascii=False, separators=(",", ":"))
+    candidate_block = candidate_decision_section(record)
     rag_block, meta = rag_section(snippets or [], profile) if snippets is not None else ("", {"rag_chunks_included": 0, "targeted_boundary_doc_ids": []})
     suffix = "OBSERVABLE_EVIDENCE_FROM_PCAP:\n" + observable_json + "\nCLASSIFICATION_RECORD:\n" + core_json + "\n"
-    prompt = prefix + rag_block + suffix
+    prompt = prefix + candidate_block + rag_block + suffix
     truncated = "[truncated]" in observable_json or " more]" in observable_json or "[truncated]" in core_json
     if len(prompt) > max_chars and rag_block:
         # Drop lowest-ranked ordinary RAG before any decision-boundary card.
@@ -265,22 +299,27 @@ def _build_budgeted_prompt(
                     working.pop(index)
                     break
             rag_block, meta = rag_section(working, profile)
-            prompt = prefix + rag_block + suffix
+            prompt = prefix + candidate_block + rag_block + suffix
             truncated = True
     if len(prompt) > max_chars:
         # Preserve schema/instructions and core fields; shorten verbose application summaries.
-        available = max(900, max_chars - len(prefix) - len(rag_block) - len("OBSERVABLE_EVIDENCE_FROM_PCAP:\n\nCLASSIFICATION_RECORD:\n\n"))
+        available = max(900, max_chars - len(prefix) - len(candidate_block) - len(rag_block) - len("OBSERVABLE_EVIDENCE_FROM_PCAP:\n\nCLASSIFICATION_RECORD:\n\n"))
         core_json = json.dumps(compact_record(record, min(1600, available // 2)), ensure_ascii=False, separators=(",", ":"))
         observable = compact_observable(record, max(450, available - len(core_json)))
         observable_json = json.dumps(observable, ensure_ascii=False, separators=(",", ":"))
         suffix = "OBSERVABLE_EVIDENCE_FROM_PCAP:\n" + observable_json + "\nCLASSIFICATION_RECORD:\n" + core_json + "\n"
-        prompt = prefix + rag_block + suffix
+        prompt = prefix + candidate_block + rag_block + suffix
         truncated = True
     if len(prompt) > max_chars and rag_block:
         # A pathological record may force all RAG out; the current record always wins.
         rag_block = ""
         meta = {"rag_chunks_included": 0, "targeted_boundary_doc_ids": [], "boundary_dropped_for_core_record": True}
+        prompt = prefix + candidate_block + suffix
+        truncated = True
+    if len(prompt) > max_chars and candidate_block:
+        candidate_block = ""
         prompt = prefix + suffix
+        meta["candidate_context_dropped_for_budget"] = True
         truncated = True
     if len(prompt) > max_chars:
         raise ValueError(f"core prompt exceeds profile budget: {len(prompt)} > {max_chars}")

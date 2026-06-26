@@ -15,7 +15,8 @@ from build_qwen35_session_prompts import STAGE_CODES, TECHNIQUE_TO_STAGE, build_
 from build_rag_query import detect_confusion_groups, record_terms, targeted_rag_metadata
 from evaluate_phase1_predictions import evaluate
 from parse_public_pcaps import discover_pcaps, parse_case
-from run_phase1_pipeline import official_rows, qwen_extra_body, run_api, safe_config_report, validate_prediction
+from run_phase1_pipeline import official_rows, qwen_extra_body, run_api, safe_config_report, validate_prediction, write_candidate_diagnostics
+from technique_profiles import TECHNIQUE_PROFILES, technique_codes, validate_profiles
 
 
 def one_pcap_record(records: list[dict], cards: list[dict] | None = None) -> dict:
@@ -27,6 +28,15 @@ def one_pcap_record(records: list[dict], cards: list[dict] | None = None) -> dic
 
 
 class Phase1PromptTests(unittest.TestCase):
+    def test_technique_profiles_cover_all_techniques(self) -> None:
+        validate_profiles()
+        self.assertEqual(set(TECHNIQUE_PROFILES), set(technique_codes()))
+        self.assertEqual(len(technique_codes()), 8)
+        for code, profile in TECHNIQUE_PROFILES.items():
+            self.assertTrue(profile["positive_evidence"], code)
+            self.assertTrue(profile["negative_evidence"], code)
+            self.assertTrue(profile["weak_evidence"], code)
+
     def test_neutral_case_ids_hide_label_bearing_filenames(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -243,12 +253,27 @@ class Phase1PromptTests(unittest.TestCase):
         self.assertEqual(rows[0]["reason"], "Port fanout across the PCAP.")
         self.assertEqual(rows[0]["研判理由（不计入评分）"], "Port fanout across the PCAP.")
 
+        session_row = official_rows(
+            [{
+                "record_id": "phase1_001::session::000001", "pcap_id": "phase1_001", "record_type": "session",
+                "stage_code": "TN01", "technique_guess": "TN01_01", "confidence": 0.8, "reason": "Ordinary short flow.",
+            }],
+            {"phase1_001::session::000001": "a.pcap"},
+        )[0]
+        self.assertEqual(session_row["record_type"], "session")
+        self.assertEqual(session_row["stage_code"], "TN01")
+
     def test_pcap_candidate_scores_capture_attack_priors(self) -> None:
         exploit = one_pcap_record([{
             "pcap_id": "phase1_001", "record_id": "phase1_001::session::1", "record_type": "session",
             "suspicious_payload_snippets": ["cmd=whoami"],
             "exploit_indicators": {"command_injection": True},
         }])
+        self.assertEqual(set(exploit["candidate_technique_scores"]), set(technique_codes()))
+        self.assertIn("top_rule_candidates", exploit)
+        self.assertIn("candidate_evidence", exploit)
+        self.assertIn("candidate_counter_evidence", exploit)
+        self.assertIn("evidence_strength", exploit)
         self.assertGreater(exploit["candidate_technique_scores"]["TA01_02"], exploit["candidate_technique_scores"]["TN01_01"])
 
         beacon = one_pcap_record([{
@@ -291,6 +316,76 @@ class Phase1PromptTests(unittest.TestCase):
             "implant_indicators": {"payload_delivery_hint": True},
         }])
         self.assertGreater(generic_post["candidate_technique_scores"]["TA01_02"], generic_post["candidate_technique_scores"]["TA03_01"])
+
+    def test_pcap_candidate_scores_counter_false_positive_families(self) -> None:
+        encoded_only = one_pcap_record([{
+            "pcap_id": "phase1_001", "record_id": "phase1_001::session::encoded", "record_type": "session",
+            "suspicious_payload_snippets": ["base64 AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH"],
+        }])
+        self.assertGreaterEqual(encoded_only["candidate_technique_scores"]["TN01_01"], encoded_only["candidate_technique_scores"]["TA01_02"])
+
+        steam = one_pcap_record([{
+            "pcap_id": "phase1_001", "record_id": "phase1_001::session::steam", "record_type": "session",
+            "http_hosts": ["cdn.steamcontent.com"], "http_uris_sample": ["/depot/123/chunk/abcdef"],
+            "http_user_agents": ["Valve/Steam HTTP Client"], "http_content_types": ["application/x-steam-chunk"],
+            "suspicious_payload_snippets": ["binary chunk data"],
+        }])
+        self.assertGreater(steam["candidate_technique_scores"]["TN01_01"], steam["candidate_technique_scores"]["TA01_02"])
+        self.assertTrue(any("download/chunk" in item for item in steam["candidate_counter_evidence"]["TA01_02"]))
+
+        webshell = one_pcap_record([{
+            "pcap_id": "phase1_001", "record_id": "phase1_001::session::shell", "record_type": "session",
+            "http_uris_sample": ["/shell.php?cmd=whoami"], "suspicious_http_parameters": ["cmd=whoami"],
+            "exploit_indicators": {"command_injection": True},
+        }])
+        self.assertGreater(webshell["candidate_technique_scores"]["TA11_01"], webshell["candidate_technique_scores"]["TA01_02"])
+
+        placement = one_pcap_record([{
+            "pcap_id": "phase1_001", "record_id": "phase1_001::session::upload", "record_type": "session",
+            "http_multipart_present": True, "http_upload_hints": ["/admin/upload filename=shell.php"],
+            "implant_indicators": {"webshell_filename": True},
+        }])
+        self.assertGreater(placement["candidate_technique_scores"]["TA03_01"], placement["candidate_technique_scores"]["TA01_02"])
+
+        weak_php = one_pcap_record([{
+            "pcap_id": "phase1_001", "record_id": "phase1_001::session::weak", "record_type": "session",
+            "http_methods": ["POST"], "http_uris_sample": ["/chuli.php"],
+        }])
+        self.assertIn("generic_php_post_weak_implant_evidence", weak_php["rule_conflict_flags"])
+        self.assertLess(weak_php["candidate_technique_scores"]["TA03_01"], 1.0)
+
+    def test_candidate_scores_csv_is_generated(self) -> None:
+        record = one_pcap_record([{
+            "pcap_id": "phase1_001", "record_id": "phase1_001::session::1", "record_type": "session",
+            "suspicious_payload_snippets": ["cmd=whoami"],
+            "exploit_indicators": {"command_injection": True},
+        }])
+        result = {
+            "record_id": record["record_id"], "pcap_id": record["pcap_id"], "record_type": "pcap",
+            "stage_code": "TA01", "technique_guess": "TA01_02", "confidence": 0.7,
+            "reason": "Exploit payload is visible.",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = {
+                "candidate_scores": root / "candidate_scores.csv",
+                "candidate_score_report": root / "candidate_score_report.md",
+                "conflict_cases": root / "conflict_cases.jsonl",
+                "critic_prompts": root / "critic_review_prompts",
+            }
+            stats = write_candidate_diagnostics(
+                {"enable_critic": True, "critic_only_on_conflict": True},
+                paths,
+                [record],
+                [result],
+                {record["record_id"]: "sample.pcap"},
+            )
+            self.assertEqual(stats["candidate_rows"], 1)
+            self.assertTrue(paths["candidate_scores"].exists())
+            self.assertTrue(paths["candidate_score_report"].exists())
+            text = paths["candidate_scores"].read_text(encoding="utf-8-sig")
+            self.assertIn("primary_rule_candidate", text)
+            self.assertIn("TA01_02", text)
 
 
 class Phase1ParserSelectionTests(unittest.TestCase):
