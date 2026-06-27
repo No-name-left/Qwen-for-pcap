@@ -74,6 +74,21 @@ def main() -> int:
     scan_groups = detect_confusion_groups(scan)
     scan_triggers, scan_docs, _ = targeted_rag_metadata(scan, scan_groups)
     assert "scan_timing=positive" in scan_triggers and "observable_scan_probe_timing" in scan_docs
+    assert "port_or_target_fanout=positive" in scan_triggers
+    assert "boundary_ta43_01_vs_ta43_02" in scan_docs
+
+    vuln_scan_record = {
+        "record_id": "scan::vuln", "pcap_id": "scan_fixture", "record_type": "session",
+        "service": "http", "dst_port": 80,
+        "http_uris_sample": ["/admin", "/phpmyadmin", "/.git/config", "/wp-admin", "/server-status", "/cgi-bin/test"],
+        "http_status_codes": ["404", "404", "404", "404", "404", "200"],
+        "http_user_agents": ["Nikto/2.5.0"],
+        "vuln_scan_indicators": {"high_uri_fanout": True, "high_404_rate": True, "scanner_user_agents": ["Nikto"], "cve_probe_hint": True},
+    }
+    vuln_groups = detect_confusion_groups(vuln_scan_record)
+    vuln_triggers, vuln_docs, _ = targeted_rag_metadata(vuln_scan_record, vuln_groups)
+    assert {"uri_fanout=positive", "http_404_rate=positive", "scanner_user_agent=positive", "cve_or_probe_path=positive"}.issubset(set(vuln_triggers))
+    assert "boundary_ta43_01_vs_ta43_02" in vuln_docs and "observable_vulnerability_scan_indicators" in vuln_docs
 
     c2 = make_c2_callback_group([c2_card(index) for index in range(10)], 1)
     assert c2["record_type"] == "c2_callback_group"
@@ -87,6 +102,7 @@ def main() -> int:
     assert "c2_indicators" in fields and "c2_indicators=positive" in triggers
     assert "observable_backdoor_access_vs_callback" in docs
     assert "callback_timing=positive" in triggers and "observable_beacon_timing_boundary" in docs
+    assert {"fixed_endpoint=positive", "packet_size_pattern=positive"}.issubset(set(triggers))
     terms, rules, _ = record_terms(c2)
     assert "callback group" in terms and "c2_callback_group:TA11_02_boundary" in rules
     profile = load_runtime_profile("nvidia_ubuntu_online_api", DEFAULT_RUNTIME_PROFILES)
@@ -113,6 +129,29 @@ def main() -> int:
     assert fast_group["evidence_tier"] != "high_callback_behavioral"
     assert fast_group["benign_periodic_hints"]["short_burst_not_beacon"]
     assert "vuln_scan_indicators" in fast_group["competing_behavior_fields"]
+
+    chain_record = {
+        "record_id": "chain::1", "pcap_id": "chain_fixture", "record_type": "session",
+        "service": "http", "dst_port": 80,
+        "ordered_event_summary": ["exploit request", "multipart upload", "webshell command access"],
+        "exploit_to_upload_delta": 2.0, "upload_to_access_delta": 3.0,
+        "http_multipart_present": True, "http_upload_hints": ["/admin/upload"],
+        "suspicious_http_parameters": ["cmd=whoami"],
+        "exploit_indicators": {"command_injection": True},
+        "implant_indicators": {"multipart_upload": True, "webshell_filename_hint": True},
+        "backdoor_access_indicators": {"webshell_path_hint": True, "command_parameter_hint": True},
+    }
+    chain_groups = detect_confusion_groups(chain_record)
+    chain_triggers, chain_docs, _ = targeted_rag_metadata(chain_record, chain_groups)
+    assert "ta01_02_vs_ta03_01_vs_ta11_01" in chain_groups
+    assert "exploit_upload_access_boundary=positive" in chain_triggers
+    assert {
+        "observable_exploit_upload_access_sequence",
+        "observable_exploit_indicator_mapping",
+        "observable_file_upload_and_implant_hints",
+        "observable_backdoor_access_vs_callback",
+        "competition_backdoor_implant_access_callback_boundary",
+    }.issubset(set(chain_docs))
 
     strict_path = ROOT / "datasets/public_eval/strict_observable_v3_records.jsonl"
     strict = [json.loads(line) for line in strict_path.read_text(encoding="utf-8").splitlines() if line.strip()]

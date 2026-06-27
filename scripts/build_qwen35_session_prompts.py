@@ -16,10 +16,19 @@ from qwen35_rag_utils import (
     load_json,
     load_runtime_profile,
 )
+from technique_profiles import boundary_rules_for_candidates, prompt_profile_summary
 
 
 PROMPT_VERSION = "observable_timing_boundary_rag_v4"
 TECHNIQUE_CODES = ["TA43_01", "TA43_02", "TA01_01", "TA01_02", "TA03_01", "TA11_01", "TA11_02", "TN01_01"]
+STAGE_CODES = ["TA43", "TA01", "TA03", "TA11", "TN01"]
+TECHNIQUE_TO_STAGE = {
+    "TA43_01": "TA43", "TA43_02": "TA43",
+    "TA01_01": "TA01", "TA01_02": "TA01",
+    "TA03_01": "TA03",
+    "TA11_01": "TA11", "TA11_02": "TA11",
+    "TN01_01": "TN01",
+}
 TIMING_KEYS = [
     "duration", "packet_rate", "byte_rate", "time_span",
     "scan_start", "scan_end", "scan_duration", "port_probe_count", "probe_rate",
@@ -46,6 +55,9 @@ CORE_KEYS = [
     "c2_group_id", "connection_count",
     "bytes_pattern", "duration_pattern", "dns_query_repetition", "tls_sni_repetition",
     "callback_direction_hint", "member_session_count",
+    "pcap_name", "source_session_count", "source_record_count", "time_range",
+    "protocols_seen", "top_src_ips", "top_dst_ips", "top_dst_ports",
+    "services_seen", "parser_sources_seen",
 ]
 OBSERVABLE_KEYS = [
     "payload_visibility", "observable_payload_available", "encrypted_protocol",
@@ -60,6 +72,13 @@ OBSERVABLE_KEYS = [
     "exploit_indicators", "vuln_scan_indicators", "auth_indicators",
     "implant_indicators", "backdoor_access_indicators", "c2_indicators",
     "transferred_files_summary", "dns_summary", "tls_summary", "pcap_summary", "evidence_limits",
+    "candidate_technique_scores", "candidate_evidence", "candidate_counter_evidence",
+    "candidate_weak_evidence", "primary_rule_candidate", "top_rule_candidates",
+    "score_margin", "rule_conflict_flags", "evidence_strength", "rule_evidence",
+    "payload_visibility_summary", "http_context_summary", "dns_context_summary",
+    "tls_context_summary", "ftp_context_summary", "scan_group_summary",
+    "auth_attempt_summary", "beacon_like_summary", "suspicious_indicator_counts",
+    "top_suspicious_sessions", "top_payload_evidence", "representative_benign_context",
 ]
 
 
@@ -149,7 +168,9 @@ def instruction_block() -> str:
     return (
         f"PROMPT_VERSION: {PROMPT_VERSION}\n"
         "Classify exactly one PCAP session or behavioral group into the official closed set. Predict technique_code only; stage_code is derived by the program.\n"
-        "Return exactly one JSON object and no Markdown, Thinking Process, or text outside JSON.\n"
+        "Return exactly one JSON object.\n"
+        "Do not output Markdown, a Thinking Process, or explanations before or after JSON.\n"
+        "The first character must be \"{\" and the last character must be \"}\".\n"
         "The record is primary evidence. RAG is boundary guidance only; when RAG conflicts with observed behavior, follow the record.\n"
         "Observable indicators are network-side evidence: they may show an attempt, upload, or command text but do not prove host-side execution, persistence, or success.\n"
         "Use only this record and same-PCAP aggregates. Never use IP/domain reputation or context from another PCAP.\n"
@@ -157,15 +178,45 @@ def instruction_block() -> str:
         "Time intervals, rates, burst shape, and event order are network-side evidence. In encrypted traffic, rely more on these metadata summaries without inventing hidden content.\n"
         "Periodicity alone is not C2: combine it with endpoint stability, direction, port, DNS/SNI, transfer-size pattern, application context, and benign update/telemetry/DNS/NTP hints.\n"
         "If evidence remains insufficient after behavioral review, TN01_01 is allowed. Ordinary HTTP/TLS/DNS or a few normal logins are not attacks.\n"
-        "TA43_01 needs port/target fanout or short failed discovery; do not upgrade ordinary port scans to TA43_02. TA43_02 needs service fingerprinting, scanner paths/plugins, CVE or vulnerability-specific probes.\n"
-        "TA01_01 needs repeated authentication attempts with failure/credential evidence. TA01_02 needs exploit payload, abnormal URI, injection, traversal, webshell upload, or vulnerability-trigger evidence.\n"
+        "TA43_01 needs port/target fanout, short failed discovery, probe rate, or bursty multi-port behavior. TA43_02 needs same-service URI fanout, scanner User-Agent, CVE/probe path, 404 directory-scan pattern, service fingerprinting, scanner paths/plugins, or vulnerability-specific probes.\n"
+        "TA01_01 needs repeated authentication attempts with failure/credential evidence, high attempt rate, failure burst, or success-after-failures hint; a single failed login is not brute force. TA01_02 needs exploit payload, abnormal URI, injection, traversal, malicious parameter, or vulnerability-trigger evidence.\n"
         "For auth_attempt_group, require repeated attempts plus explicit failure or credential-field evidence; weak_auth_evidence is not enough for TA01_01.\n"
-        "TA03_01 requires network-visible upload/delivery or implant-placement evidence; never claim host persistence succeeded. TA11_01 is attacker-initiated access to an existing backdoor or interactive control entry. TA11_02 is victim-initiated callback/beacon/C2 behavior.\n"
-        "For c2_callback_group, use fixed remote endpoint, repeated source-initiated connections, interval/byte patterns, unusual port, and DNS/TLS repetition together.\n"
+        "TA03_01 requires network-visible upload/delivery or implant-placement evidence such as multipart/form-data, webshell-like filename, or payload delivery; never claim host persistence succeeded. TA11_01 is later access to an existing backdoor endpoint, command parameter, or interactive control entry.\n"
+        "TA11_02 is victim-initiated callback/beacon/C2 behavior. Periodicity alone is not C2; for c2_callback_group, use fixed remote endpoint, repeated source-initiated connections, interval/byte patterns, packet size pattern, unusual port, DNS/TLS repetition, and benign periodic hints together.\n"
         "When plaintext suspicious strings are visible, use their URI/body context. When payload_visibility is encrypted_tls or metadata_only, do not invent content and do not default to normal solely because payload is hidden.\n"
         f"Allowed technique_code values: {', '.join(TECHNIQUE_CODES)}. No legacy or invented labels.\n"
         "Required JSON fields: record_id, pcap_id, record_type, start_time, end_time, src_ip, src_port, dst_ip, dst_port, predicted_code, confidence, reason.\n"
         "confidence must be 0..1 and reason must be one short sentence.\n"
+    )
+
+
+def phase1_instruction_block() -> str:
+    return (
+        f"PROMPT_VERSION: {PROMPT_VERSION}\n"
+        "Classify exactly one PCAP session or behavioral group for Phase-1 scoring. Predict stage_code first; technique_guess is optional best-effort detail and never overrides stage_code.\n"
+        "If record_type is pcap, you are judging the whole PCAP, not a single session: aggregate all sessions/groups, produce one stage_code for the entire PCAP, and use top_suspicious_sessions/top_payload_evidence only as representative evidence.\n"
+        "If record_type is session or a behavioral group, judge only that record with same-PCAP aggregates as context.\n"
+        "candidate_technique_scores are deterministic evidence priors, not final labels. Prefer the highest-scoring candidate when evidence is strong and counter-evidence is weak. If top candidates are close, use boundary rules and RAG context. Do not classify as TN01_01 when explicit attack indicators are present. Do not choose an attack label solely from weak evidence such as a single POST or encrypted traffic. Explain both supporting evidence and key counter-evidence in reason.\n"
+        "Return exactly one JSON object.\n"
+        "Do not output Markdown, a Thinking Process, or explanations before or after JSON.\n"
+        "The first character must be \"{\" and the last character must be \"}\".\n"
+        "The record is primary evidence. RAG is decision-boundary guidance only; when RAG conflicts with observed behavior, follow the record.\n"
+        "Never use an answer table, ground truth, expected label, or any label-bearing evaluation artifact.\n"
+        "Use only network-visible evidence from this record and same-PCAP aggregates. Do not infer host execution, persistence success, identity, reputation, or hidden encrypted payload.\n"
+        "Missing payload is not proof of normality. For encrypted or metadata-only traffic, use direction, repetition, timing, fanout, failures, byte patterns, DNS/SNI, and endpoint roles without inventing content.\n"
+        "Periodicity alone is not C2. Ordinary HTTP/TLS/DNS, update traffic, telemetry, NTP, and a few normal logins may be TN01.\n"
+        "Stage meanings: TA43=reconnaissance or vulnerability discovery; TA01=credential attack or exploitation attempt; TA03=network-visible payload delivery or implant placement; TA11=backdoor access, callback, beaconing, or C2; TN01=normal or insufficient attack evidence.\n"
+        "Technique mapping: TA43_01/TA43_02->TA43; TA01_01/TA01_02->TA01; TA03_01->TA03; TA11_01/TA11_02->TA11; TN01_01->TN01.\n"
+        "TA43 needs target/port fanout, service fingerprinting, scanner User-Agent, URI fanout, 404 probe pattern, scanner paths/plugins, CVE probes, or other discovery behavior. Distinguish TA43_01 port scan from TA43_02 vulnerability scan using application probe evidence.\n"
+        "TA01 needs repeated credential failures/credential fields, high attempt rate, failure burst, success-after-failures hint, or exploit-specific payload, URI, injection, traversal, malicious parameter, or vulnerability-trigger evidence. A single login failure is not brute force.\n"
+        "TA03 needs network-visible delivery/upload or implant-placement evidence such as multipart/form-data, webshell-like filename, or payload delivery; never claim host-side installation succeeded from PCAP alone.\n"
+        "TA11 needs attacker-initiated access to an existing backdoor endpoint/command parameter or victim-initiated repeated callback/beacon/C2 behavior supported by fixed endpoint, timing, direction, byte-pattern, DNS/SNI, and benign-periodic context.\n"
+        "Close-technique rules: TA43_01=port/host discovery with many destination ports and little application probing; TA43_02=web/service vulnerability discovery including sensitive paths, scanner-like URIs, 404/403/502 probe responses, CVE/admin/config/db paths; TA01_01=repeated login/auth attempts, especially against authentication service ports; TA01_02=visible exploit attempt, command injection, traversal, SQLi, RCE, or malicious parameters; TA03_01=payload delivery or implant placement and requires upload/drop/write/file placement evidence stronger than generic exploit POST; TA11_01=interactive access to an existing backdoor endpoint, command parameter, or webshell command use; TA11_02=callback/beacon/C2, repeated fixed endpoint, periodic small flows, encrypted beacon-like flows, or miner heartbeat; TN01_01=normal only when no meaningful attack indicator is present.\n"
+        "Encrypted traffic is not automatically benign. If encrypted sessions are endpoint-fixed, repeated, periodic, or beacon-like, prefer TA11_02 over TN01_01.\n"
+        "When evidence is ambiguous, choose the best-supported stage and lower confidence. TN01 is allowed when attack evidence remains insufficient after behavioral review.\n"
+        f"Allowed stage_code values: {', '.join(STAGE_CODES)}. Allowed non-null technique_guess values: {', '.join(TECHNIQUE_CODES)}.\n"
+        "Required JSON fields: record_id, pcap_id, record_type, start_time, end_time, src_ip, src_port, dst_ip, dst_port, stage_code, technique_guess, confidence, reason.\n"
+        "technique_guess may be null. confidence must be 0..1 and reason must be one short sentence grounded in observable PCAP evidence.\n"
     )
 
 
@@ -188,15 +239,44 @@ def rag_section(snippets: list[dict[str, Any]], profile: dict[str, Any]) -> tupl
     }
 
 
-def build_prompt(
+def candidate_decision_section(record: dict[str, Any]) -> str:
+    if record.get("record_type") != "pcap":
+        return ""
+    candidates = [
+        str(item.get("technique"))
+        for item in record.get("top_rule_candidates") or []
+        if isinstance(item, dict) and item.get("technique")
+    ]
+    if not candidates and record.get("primary_rule_candidate"):
+        candidates = [str(record["primary_rule_candidate"])]
+    if not candidates:
+        return ""
+    payload = {
+        "top_rule_candidates": record.get("top_rule_candidates"),
+        "score_margin": record.get("score_margin"),
+        "evidence_strength": record.get("evidence_strength"),
+        "rule_conflict_flags": record.get("rule_conflict_flags"),
+        "candidate_evidence": record.get("candidate_evidence"),
+        "candidate_counter_evidence": record.get("candidate_counter_evidence"),
+        "candidate_weak_evidence": record.get("candidate_weak_evidence"),
+        "technique_profiles": prompt_profile_summary(candidates),
+        "boundary_rules": [
+            {"id": rule["id"], "text": rule["text"]}
+            for rule in boundary_rules_for_candidates(candidates, limit=5)
+        ],
+    }
+    compact = trim_value(payload, 1800, list_limit=4)
+    return "CANDIDATE_DECISION_CONTEXT:\n" + json.dumps(compact, ensure_ascii=False, separators=(",", ":")) + "\n"
+
+
+def _build_budgeted_prompt(
     record: dict[str, Any],
-    task: str,
     snippets: list[dict[str, Any]] | None,
     profile: dict[str, Any],
+    prefix: str,
+    task_name: str,
     retrieval_meta: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    if task != "technique":
-        raise ValueError("only technique classification prompts are supported; stage_code is derived deterministically")
     configured_chars = int(profile.get("max_prompt_chars", 10**9))
     token_chars = int(profile.get("max_prompt_tokens", 3500)) * 3
     max_chars = min(configured_chars, token_chars)
@@ -205,10 +285,10 @@ def build_prompt(
     core_json = json.dumps(core, ensure_ascii=False, separators=(",", ":"))
     observable = compact_observable(record, max(600, session_limit - len(core_json)))
     observable_json = json.dumps(observable, ensure_ascii=False, separators=(",", ":"))
-    prefix = instruction_block()
+    candidate_block = candidate_decision_section(record)
     rag_block, meta = rag_section(snippets or [], profile) if snippets is not None else ("", {"rag_chunks_included": 0, "targeted_boundary_doc_ids": []})
     suffix = "OBSERVABLE_EVIDENCE_FROM_PCAP:\n" + observable_json + "\nCLASSIFICATION_RECORD:\n" + core_json + "\n"
-    prompt = prefix + rag_block + suffix
+    prompt = prefix + candidate_block + rag_block + suffix
     truncated = "[truncated]" in observable_json or " more]" in observable_json or "[truncated]" in core_json
     if len(prompt) > max_chars and rag_block:
         # Drop lowest-ranked ordinary RAG before any decision-boundary card.
@@ -219,28 +299,34 @@ def build_prompt(
                     working.pop(index)
                     break
             rag_block, meta = rag_section(working, profile)
-            prompt = prefix + rag_block + suffix
+            prompt = prefix + candidate_block + rag_block + suffix
             truncated = True
     if len(prompt) > max_chars:
         # Preserve schema/instructions and core fields; shorten verbose application summaries.
-        available = max(900, max_chars - len(prefix) - len(rag_block) - len("OBSERVABLE_EVIDENCE_FROM_PCAP:\n\nCLASSIFICATION_RECORD:\n\n"))
+        available = max(900, max_chars - len(prefix) - len(candidate_block) - len(rag_block) - len("OBSERVABLE_EVIDENCE_FROM_PCAP:\n\nCLASSIFICATION_RECORD:\n\n"))
         core_json = json.dumps(compact_record(record, min(1600, available // 2)), ensure_ascii=False, separators=(",", ":"))
         observable = compact_observable(record, max(450, available - len(core_json)))
         observable_json = json.dumps(observable, ensure_ascii=False, separators=(",", ":"))
         suffix = "OBSERVABLE_EVIDENCE_FROM_PCAP:\n" + observable_json + "\nCLASSIFICATION_RECORD:\n" + core_json + "\n"
-        prompt = prefix + rag_block + suffix
+        prompt = prefix + candidate_block + rag_block + suffix
         truncated = True
     if len(prompt) > max_chars and rag_block:
         # A pathological record may force all RAG out; the current record always wins.
         rag_block = ""
         meta = {"rag_chunks_included": 0, "targeted_boundary_doc_ids": [], "boundary_dropped_for_core_record": True}
+        prompt = prefix + candidate_block + suffix
+        truncated = True
+    if len(prompt) > max_chars and candidate_block:
+        candidate_block = ""
         prompt = prefix + suffix
+        meta["candidate_context_dropped_for_budget"] = True
         truncated = True
     if len(prompt) > max_chars:
         raise ValueError(f"core prompt exceeds profile budget: {len(prompt)} > {max_chars}")
     retrieval_meta = retrieval_meta or {}
     meta.update({
         "prompt_version": PROMPT_VERSION,
+        "task": task_name,
         "runtime_profile": profile.get("name", "inline"),
         "prompt_chars": len(prompt),
         "estimated_prompt_tokens": estimate_tokens(prompt),
@@ -252,6 +338,7 @@ def build_prompt(
         "targeted_rag_triggers": retrieval_meta.get("targeted_rag_triggers", []),
         "targeted_boundary_cards": retrieval_meta.get("targeted_boundary_cards", meta.get("targeted_boundary_doc_ids", [])),
     })
+    meta["retrieved_rag_chunks"] = meta["rag_chunks_included"]
     meta["prompt_budget_summary"] = {
         "prompt_chars": meta["prompt_chars"],
         "estimated_prompt_tokens": meta["estimated_prompt_tokens"],
@@ -262,6 +349,32 @@ def build_prompt(
         "timing_fields_included": meta["timing_fields_included"],
     }
     return prompt, meta
+
+
+def build_prompt(
+    record: dict[str, Any],
+    task: str,
+    snippets: list[dict[str, Any]] | None,
+    profile: dict[str, Any],
+    retrieval_meta: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any]]:
+    if task != "technique":
+        raise ValueError("only technique classification prompts are supported; stage_code is derived deterministically")
+    return _build_budgeted_prompt(
+        record, snippets, profile, instruction_block(), "technique", retrieval_meta,
+    )
+
+
+def build_phase1_prompt(
+    record: dict[str, Any],
+    snippets: list[dict[str, Any]] | None,
+    profile: dict[str, Any],
+    retrieval_meta: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Build a stage-first Phase-1 prompt without changing the technique-only API."""
+    return _build_budgeted_prompt(
+        record, snippets, profile, phase1_instruction_block(), "phase1_stage_first", retrieval_meta,
+    )
 
 
 def prompt_text(

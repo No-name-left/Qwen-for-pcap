@@ -176,6 +176,23 @@ def observable_http_path(case_dir: Path) -> Path | None:
     return None
 
 
+def parse_summary_by_case(parsed_dir: Path) -> dict[str, dict[str, Any]]:
+    summary_path = parsed_dir / "parse_all_summary.json"
+    if not summary_path.exists():
+        return {}
+    try:
+        rows = json.loads(summary_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(rows, list):
+        return {}
+    return {
+        str(row.get("case_id")): row
+        for row in rows
+        if isinstance(row, dict) and row.get("case_id")
+    }
+
+
 def display_path(path: Path) -> str:
     resolved = path.resolve()
     try:
@@ -371,7 +388,7 @@ def make_session_evidence(
         "evidence_limits": dict(EVIDENCE_LIMITS),
         "evidence_mapping": {
             "method": mapping_method,
-            "confidence": "high" if mapping_method in {"zeek_uid", "tcp_stream"} else "medium" if mapping_method == "bidirectional_five_tuple" else "not_applicable",
+            "confidence": "high" if mapping_method.startswith("zeek_uid") or mapping_method == "tcp_stream" else "medium" if mapping_method == "bidirectional_five_tuple" else "not_applicable",
         },
         "http_summary": http_summary,
         **http,
@@ -462,7 +479,7 @@ def build_cards_from_packets(
     return cards
 
 
-def build_cards_for_pcap(case_dir: Path, pcap_id: str) -> list[dict[str, Any]]:
+def build_cards_for_pcap(case_dir: Path, pcap_id: str, zeek_parser_source: str = "zeek_conn") -> list[dict[str, Any]]:
     conn_rows = read_zeek_log(log_path(case_dir, "conn.log"))
     http_by_uid = rows_by_uid(read_zeek_log(log_path(case_dir, "http.log")))
     dns_by_uid = rows_by_uid(read_zeek_log(log_path(case_dir, "dns.log")))
@@ -504,6 +521,9 @@ def build_cards_for_pcap(case_dir: Path, pcap_id: str) -> list[dict[str, Any]]:
                 mapping_method = "bidirectional_five_tuple"
         service = row.get("service") if row.get("service") != "-" else None
         uid_text = str(uid) if uid else ""
+        evidence_mapping_method = "zeek_uid" if http_by_uid.get(uid_text) else mapping_method
+        if http_by_uid.get(uid_text) and mapped_observations:
+            evidence_mapping_method = f"zeek_uid+{mapping_method}"
         evidence = make_session_evidence(
             service,
             dst_port,
@@ -514,13 +534,13 @@ def build_cards_for_pcap(case_dir: Path, pcap_id: str) -> list[dict[str, Any]]:
             ssh_by_uid.get(uid_text, []),
             ftp_by_uid.get(uid_text, []) or ftp_rows_from_packets(packets),
             observation_source_available,
-            "zeek_uid" if http_by_uid.get(uid_text) else mapping_method,
+            evidence_mapping_method,
         )
         card = {
             "record_type": "session",
             "session_id": f"{pcap_id}::session::{idx:06d}",
             "pcap_id": pcap_id,
-            "parser_source": "zeek_conn",
+            "parser_source": zeek_parser_source,
             "start_time": ts,
             "end_time": end_ts,
             "src_ip": src_ip or None,
@@ -738,13 +758,17 @@ def main() -> int:
     per_pcap: dict[str, int] = {}
     warnings: list[str] = []
     discovered_case_dirs = pcap_dirs(args.parsed_dir)
+    summary_by_case = parse_summary_by_case(args.parsed_dir)
     for case_dir in discovered_case_dirs:
         if case_dir == args.parsed_dir:
             pcap_id = "parsed"
         else:
             relative = case_dir.relative_to(args.parsed_dir)
             pcap_id = "__".join(relative.parts)
-        cards = build_cards_for_pcap(case_dir, pcap_id)
+        parse_meta = summary_by_case.get(pcap_id, {})
+        parser_source = str(parse_meta.get("parser_source") or "zeek_conn")
+        zeek_parser_source = parser_source if parser_source in {"zeek_conn", "zeek_docker"} else "zeek_conn"
+        cards = build_cards_for_pcap(case_dir, pcap_id, zeek_parser_source)
         if not cards:
             warnings.append(f"No Zeek conn sessions found for `{pcap_id}`.")
         per_pcap[pcap_id] = len(cards)

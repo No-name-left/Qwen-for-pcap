@@ -13,6 +13,7 @@ from session_card_indicators import make_safe_http_observation, sanitize_uri
 
 
 ROOT = Path(os.environ.get("PCAP_LLM_ROOT", Path(__file__).resolve().parents[1])).resolve()
+DEFAULT_ZEEK_DOCKER_IMAGE = "public.ecr.aws/zeek/zeek:8.0.6-arm64"
 
 TSHARK_FIELDS = [
     "frame.time_epoch",
@@ -130,10 +131,100 @@ def sanitize_zeek_application_logs(zeek_dir: Path) -> None:
                 for field in ("username", "password"):
                     if field in row and row[field] not in {"", "-"}:
                         parts[fields.index(field)] = "[REDACTED]"
-            elif str(row.get("command") or "").upper() == "PASS" and "arg" in fields:
+            elif str(row.get("command") or "").upper() in {"USER", "PASS"} and "arg" in fields:
                 parts[fields.index("arg")] = "[REDACTED]"
             out.append("\t".join(parts))
         path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+def run_tshark_fallback(pcap_abs: Path, tshark_dir: Path) -> tuple[bool, int, str]:
+    packets_csv = tshark_dir / "packets.csv"
+    observable_http = tshark_dir / "observable_http.jsonl"
+    observable_http_count = 0
+    if not command_exists("tshark"):
+        return False, observable_http_count, "tshark missing; packet CSV not generated"
+    tshark_cmd = [
+        "tshark",
+        "-r",
+        str(pcap_abs),
+        "-T",
+        "fields",
+        "-E",
+        "header=y",
+        "-E",
+        "separator=,",
+        "-E",
+        "quote=d",
+        "-E",
+        "occurrence=f",
+    ]
+    for field in TSHARK_FIELDS:
+        tshark_cmd.extend(["-e", field])
+    tshark_rc, _, tshark_err = run(tshark_cmd, stdout_path=packets_csv)
+    if tshark_rc != 0:
+        return False, observable_http_count, f"tshark failed rc={tshark_rc}: {concise_error(tshark_err)}"
+    observable_rc, observable_http_count, observable_err = extract_safe_http_observations(pcap_abs, observable_http)
+    if observable_rc != 0:
+        return True, observable_http_count, f"tshark observable HTTP extraction failed rc={observable_rc}: {concise_error(observable_err)}"
+    return True, observable_http_count, ""
+
+
+def run_tshark_observable_supplement(pcap_abs: Path, tshark_dir: Path) -> tuple[bool, int, str]:
+    """Extract supplemental HTTP observable evidence without changing the main parser."""
+    observable_http = tshark_dir / "observable_http.jsonl"
+    observable_rc, observable_http_count, observable_err = extract_safe_http_observations(pcap_abs, observable_http)
+    if observable_rc != 0:
+        return False, observable_http_count, f"tshark observable supplement failed rc={observable_rc}: {concise_error(observable_err)}"
+    return True, observable_http_count, ""
+
+
+def run_system_zeek(pcap_abs: Path, zeek_dir: Path) -> tuple[bool, str]:
+    env = os.environ.copy()
+    env["PATH"] = f"/opt/zeek/bin:{env.get('PATH', '')}"
+    if not command_exists("zeek", env):
+        return False, "system zeek missing"
+    zeek_rc, zeek_out, zeek_err = run(["zeek", "-C", "-r", str(pcap_abs)], cwd=zeek_dir, env=env)
+    (zeek_dir / "zeek_run.stdout").write_text(zeek_out, encoding="utf-8")
+    (zeek_dir / "zeek_run.stderr").write_text(zeek_err, encoding="utf-8")
+    if zeek_rc != 0:
+        return False, f"system zeek failed rc={zeek_rc}: {concise_error(zeek_err)}"
+    sanitize_zeek_application_logs(zeek_dir)
+    return True, ""
+
+
+def docker_image_available(image: str) -> tuple[bool, str]:
+    if not command_exists("docker"):
+        return False, "docker missing"
+    inspect_rc, _, inspect_err = run(["docker", "image", "inspect", image])
+    if inspect_rc != 0:
+        return False, f"docker image unavailable: {image}: {concise_error(inspect_err)}"
+    return True, ""
+
+
+def run_docker_zeek(pcap_abs: Path, zeek_dir: Path, image: str) -> tuple[bool, str]:
+    if not image:
+        return False, "zeek Docker image not configured"
+    available, error = docker_image_available(image)
+    if not available:
+        return False, error
+    pcap_mount = pcap_abs.parent.resolve()
+    output_mount = zeek_dir.resolve()
+    container_pcap = f"/pcap/{pcap_abs.name}"
+    cmd = [
+        "docker", "run", "--rm",
+        "-v", f"{pcap_mount}:/pcap:ro",
+        "-v", f"{output_mount}:/zeek",
+        "-w", "/zeek",
+        image,
+        "zeek", "-C", "-r", container_pcap,
+    ]
+    zeek_rc, zeek_out, zeek_err = run(cmd)
+    (zeek_dir / "zeek_docker_run.stdout").write_text(zeek_out, encoding="utf-8")
+    (zeek_dir / "zeek_docker_run.stderr").write_text(zeek_err, encoding="utf-8")
+    if zeek_rc != 0:
+        return False, f"docker zeek failed rc={zeek_rc}: {concise_error(zeek_err)}"
+    sanitize_zeek_application_logs(zeek_dir)
+    return True, ""
 
 
 def extract_safe_http_observations(pcap: Path, output: Path) -> tuple[int | None, int, str]:
@@ -182,18 +273,28 @@ def display_path(path: Path) -> str:
         return str(path)
 
 
-def discover_pcaps(input_dir: Path, dataset_id: str | None) -> list[tuple[str, Path]]:
+def discover_pcaps(input_dir: Path, dataset_id: str | None, neutral_case_ids: bool = False) -> list[tuple[str, Path]]:
     pcaps = sorted([*input_dir.glob("*.pcap"), *input_dir.glob("*.pcapng"), *input_dir.glob("*.cap")])
     out = []
     for idx, pcap in enumerate(pcaps, start=1):
         case_id = dataset_id or pcap.stem
-        if len(pcaps) > 1 and dataset_id:
+        if dataset_id and neutral_case_ids:
+            case_id = f"{dataset_id}_{idx:03d}"
+        elif len(pcaps) > 1 and dataset_id:
             case_id = f"{dataset_id}_{idx:03d}_{pcap.stem}"
         out.append((case_id, pcap))
     return out
 
 
-def parse_case(case_id: str, pcap: Path, output_dir: Path) -> dict:
+def parse_case(
+    case_id: str,
+    pcap: Path,
+    output_dir: Path,
+    prefer_zeek: bool = True,
+    allow_tshark_fallback: bool = True,
+    zeek_docker_image: str | None = None,
+    enable_tshark_observable_supplement: bool = True,
+) -> dict:
     pcap_abs = pcap.resolve()
     case_dir = output_dir / case_id
     tshark_dir = case_dir / "tshark"
@@ -205,63 +306,90 @@ def parse_case(case_id: str, pcap: Path, output_dir: Path) -> dict:
     packets_csv = tshark_dir / "packets.csv"
     observable_http = tshark_dir / "observable_http.jsonl"
     observable_http_count = 0
-    tshark_rc = None
-    if command_exists("tshark"):
-        tshark_cmd = [
-            "tshark",
-            "-r",
-            str(pcap_abs),
-            "-T",
-            "fields",
-            "-E",
-            "header=y",
-            "-E",
-            "separator=,",
-            "-E",
-            "quote=d",
-            "-E",
-            "occurrence=f",
-        ]
-        for field in TSHARK_FIELDS:
-            tshark_cmd.extend(["-e", field])
-        tshark_rc, _, tshark_err = run(tshark_cmd, stdout_path=packets_csv)
-        if tshark_rc != 0:
-            warnings.append(f"tshark failed rc={tshark_rc}: {concise_error(tshark_err)}")
-        else:
-            observable_rc, observable_http_count, observable_err = extract_safe_http_observations(pcap_abs, observable_http)
-            if observable_rc != 0:
-                warnings.append(f"tshark observable HTTP extraction failed rc={observable_rc}: {concise_error(observable_err)}")
-    else:
-        warnings.append("tshark missing; packet CSV not generated")
+    tshark_fallback_attempted = False
+    tshark_fallback_success = False
+    tshark_fallback_error = ""
+    tshark_supplement_attempted = False
+    tshark_supplement_success = False
+    tshark_supplement_error = ""
+    tshark_supplement_rows = 0
+    zeek_success = False
+    zeek_error = ""
+    zeek_mode = "not_attempted"
+    parser_source = "none"
+    zeek_docker_image = zeek_docker_image or None
 
-    zeek_rc = None
-    env = os.environ.copy()
-    env["PATH"] = f"/opt/zeek/bin:{env.get('PATH', '')}"
-    if command_exists("zeek", env):
-        zeek_rc, zeek_out, zeek_err = run(["zeek", "-C", "-r", str(pcap_abs)], cwd=zeek_dir, env=env)
-        (zeek_dir / "zeek_run.stdout").write_text(zeek_out, encoding="utf-8")
-        (zeek_dir / "zeek_run.stderr").write_text(zeek_err, encoding="utf-8")
-        if zeek_rc != 0:
-            warnings.append(f"zeek failed rc={zeek_rc}: {concise_error(zeek_err)}")
-        else:
-            sanitize_zeek_application_logs(zeek_dir)
+    if prefer_zeek:
+        zeek_mode = "system"
+        zeek_success, zeek_error = run_system_zeek(pcap_abs, zeek_dir)
+        if zeek_success:
+            parser_source = "zeek_conn"
+        elif zeek_docker_image:
+            system_zeek_error = zeek_error
+            zeek_mode = "docker"
+            zeek_success, zeek_error = run_docker_zeek(pcap_abs, zeek_dir, zeek_docker_image)
+            if zeek_success:
+                parser_source = "zeek_docker"
+            else:
+                zeek_error = "; ".join(error for error in (system_zeek_error, zeek_error) if error)
     else:
-        (zeek_dir / "zeek_run.stderr").write_text("zeek missing\n", encoding="utf-8")
-        warnings.append("zeek missing; session card builder will use tshark packet aggregation fallback")
+        zeek_error = "prefer_zeek disabled"
+
+    if not zeek_success:
+        (zeek_dir / "zeek_run.stderr").write_text(zeek_error + "\n", encoding="utf-8")
+        if allow_tshark_fallback:
+            tshark_fallback_attempted = True
+            tshark_fallback_success, observable_http_count, tshark_fallback_error = run_tshark_fallback(pcap_abs, tshark_dir)
+            if tshark_fallback_success:
+                parser_source = "tshark_fallback"
+            if tshark_fallback_error:
+                warnings.append(tshark_fallback_error)
+            if tshark_fallback_success:
+                warnings.append(f"Zeek unavailable or failed ({zeek_error}); using tshark packet aggregation fallback")
+            else:
+                warnings.append(f"Zeek unavailable or failed ({zeek_error}); tshark fallback failed")
+        else:
+            warnings.append(f"Zeek unavailable or failed ({zeek_error}); tshark fallback disabled")
+    elif enable_tshark_observable_supplement:
+        tshark_supplement_attempted = True
+        tshark_supplement_success, tshark_supplement_rows, tshark_supplement_error = run_tshark_observable_supplement(pcap_abs, tshark_dir)
+        observable_http_count = tshark_supplement_rows
+        if tshark_supplement_error:
+            warnings.append(tshark_supplement_error)
 
     zeek_logs = [f for f in list_files(zeek_dir) if f.endswith(".log") and not f.startswith("zeek_run.")]
+    payload_supplement_source = "tshark_observable" if (
+        (tshark_supplement_success or tshark_fallback_success) and observable_http.exists()
+    ) else "none"
 
     return {
         "case_id": case_id,
         "pcap_path": display_path(pcap),
         "pcap_size": pcap.stat().st_size if pcap.exists() else None,
-        "tshark_success": tshark_rc == 0 and packets_csv.exists() and packets_csv.stat().st_size > 0,
-        "zeek_success": zeek_rc == 0,
+        "prefer_zeek": prefer_zeek,
+        "allow_tshark_fallback": allow_tshark_fallback,
+        "parser_source": parser_source,
+        "tshark_success": tshark_fallback_success and packets_csv.exists() and packets_csv.stat().st_size > 0,
+        "tshark_attempted": tshark_fallback_attempted,
+        "tshark_error": tshark_fallback_error,
+        "tshark_fallback_success": tshark_fallback_success and packets_csv.exists() and packets_csv.stat().st_size > 0,
+        "tshark_fallback_attempted": tshark_fallback_attempted,
+        "tshark_fallback_error": tshark_fallback_error,
+        "tshark_supplement_enabled": enable_tshark_observable_supplement,
+        "tshark_supplement_attempted": tshark_supplement_attempted,
+        "tshark_supplement_success": tshark_supplement_success,
+        "tshark_supplement_error": tshark_supplement_error,
+        "tshark_supplement_rows": tshark_supplement_rows,
+        "payload_supplement_source": payload_supplement_source,
+        "zeek_success": zeek_success,
+        "zeek_mode": zeek_mode,
+        "zeek_docker_image": zeek_docker_image,
+        "zeek_error": "" if zeek_success else zeek_error,
         "tshark_packets_csv": display_path(packets_csv),
         "tshark_observable_http": display_path(observable_http),
         "tshark_observable_http_rows": observable_http_count,
         "zeek_generated_logs": zeek_logs,
-        "session_parser_preference": "zeek_conn_then_tshark_fallback",
+        "session_parser_preference": "zeek_conn_then_zeek_docker_then_tshark_fallback",
         "warnings": warnings,
     }
 
@@ -271,11 +399,27 @@ def main() -> int:
     parser.add_argument("--input-dir", type=Path, default=ROOT / "datasets/public/feasibility/raw")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "outputs/parsed/feasibility")
     parser.add_argument("--dataset-id", default=None)
+    parser.add_argument("--neutral-case-ids", action="store_true", help="Do not expose source filenames in generated case/session identifiers.")
+    parser.add_argument("--prefer-zeek", action=argparse.BooleanOptionalAction, default=True, help="Prefer system/Docker Zeek before TShark fallback.")
+    parser.add_argument("--allow-tshark-fallback", action=argparse.BooleanOptionalAction, default=True, help="Use TShark packet aggregation if Zeek is unavailable or fails.")
+    parser.add_argument("--enable-tshark-observable-supplement", action=argparse.BooleanOptionalAction, default=True, help="When Zeek succeeds, also run safe TShark HTTP observable extraction.")
+    parser.add_argument("--zeek-docker-image", default=os.environ.get("ZEEK_DOCKER_IMAGE", DEFAULT_ZEEK_DOCKER_IMAGE), help="Local Docker image to use when system Zeek is unavailable or fails.")
     args = parser.parse_args()
 
-    cases = discover_pcaps(args.input_dir, args.dataset_id)
+    cases = discover_pcaps(args.input_dir, args.dataset_id, args.neutral_case_ids)
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    summary = [parse_case(case_id, pcap, args.output_dir) for case_id, pcap in cases]
+    summary = [
+        parse_case(
+            case_id,
+            pcap,
+            args.output_dir,
+            prefer_zeek=args.prefer_zeek,
+            allow_tshark_fallback=args.allow_tshark_fallback,
+            zeek_docker_image=args.zeek_docker_image,
+            enable_tshark_observable_supplement=args.enable_tshark_observable_supplement,
+        )
+        for case_id, pcap in cases
+    ]
     (args.output_dir / "parse_all_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"parsed {len(summary)} pcap files")
     return 0

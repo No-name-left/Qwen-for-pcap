@@ -85,6 +85,13 @@ deterministic query from session card
 
 Exact protocol names, port numbers, Zeek fields, behavior indicators, and tshark fields should remain strong keyword signals. Vector or hybrid retrieval may be added later, but it is optional and not a current dependency.
 
+Current boundary-oriented triggers prioritize these hard Phase-1 distinctions:
+
+- `TA43_01` versus `TA43_02`: port/target fanout, failed-rate, probe-rate, and burstiness favor port scan; URI fanout, scanner User-Agent, CVE/probe paths, directory scanning, and HTTP 404 patterns favor vulnerability scan.
+- `TA01_01`: require repeated authentication evidence such as `auth_attempt_group`, `failed_login_count`, `attempt_rate`, inter-attempt intervals, failure burst, credential fields, or success-after-failures hints. A single login failure is not brute force.
+- `TA01_02` versus `TA03_01` versus `TA11_01`: exploit requests, upload/payload delivery, and later access to the same backdoor endpoint are separate network-side stages. PCAP evidence does not prove host persistence success.
+- `TA11_02` versus `TN01_01`: periodicity alone is not C2. Fixed endpoint, small repeated payloads, regularity, DNS/SNI, suspicious ports/domains, and benign periodic hints must be weighed together.
+
 ## Main Reference Sources
 
 Reference notes are stored under `rag/sources/`. They should point to official or public references and local rule metadata without copying full webpages, full rule bodies, answer documents, or evaluation labels.

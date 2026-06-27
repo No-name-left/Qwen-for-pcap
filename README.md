@@ -7,16 +7,17 @@ Qwen-for-pcap is a PCAP/session-level network traffic classification pipeline fo
 ```text
 PCAP
 -> Zeek / tshark fallback
--> session cards and scan_group records
+-> session cards and scan/auth/C2 behavior records
+-> optional PCAP-level aggregation with technique evidence profiles and soft candidate scores
 -> deterministic RAG query
 -> keyword RAG retrieval plus feature-triggered confusion-boundary cards
--> Qwen3.5 or another OpenAI-compatible endpoint predicts technique_code only
--> official technique_code
--> deterministic technique_code-to-stage_code mapping
--> CSV export
+-> Qwen3.5 or another OpenAI-compatible endpoint makes a boundary-aware decision
+-> official submission export plus candidate/conflict diagnostics
 ```
 
 Core scripts live in `scripts/`. Runtime configuration is in `configs/`. RAG knowledge and indexes live in `rag/`. Lightweight data/eval metadata live in `datasets/metadata/`, `outputs/eval_sets/`, and `data/sft_candidates/`.
+
+Phase-1 stable defaults are anchored to `8b6d3bb Refine PCAP-level evidence profiles and boundary scoring`. The later calibration experiment `32da70c` is not part of the default inference path: safe calibration is not enabled by default, and the runner uses the stable candidate scoring, prompt, RAG, and inference behavior. `main` is the long-term stable branch; `phase1-vm-runner` is retained as the competition VM validation/freeze branch.
 
 ## Official Codes
 
@@ -112,6 +113,10 @@ export MODEL="qwen3.5"
 The runner sends Qwen `chat_template_kwargs.enable_thinking=false` by default. Use `--disable-extra-body` for online providers that reject this extension. The offline stage scripts never call an API; invoke `scripts/run_qwen_openai_compatible.py` explicitly with a technique prompt directory. `dry_run_mock` exercises result parsing and export without a network call.
 
 Targeted RAG is not unconditional prompt padding. Scan, authentication, Web/exploit, backdoor-direction, or outbound TLS/DNS/C2 features select only the relevant short boundary cards; ordinary top-ranked RAG follows within the runtime-profile budget.
+
+The Phase-1 VM runner defaults to `--granularity pcap`, the recommended mode for current Phase-1 samples. It still builds session/group evidence, then aggregates it through `evidence profiles -> soft candidate scoring -> RAG -> LLM boundary decision`. PCAP-level records include `candidate_technique_scores`, `top_rule_candidates`, evidence/counter-evidence, margin, strength, and conflict flags.
+
+Use `official_submission.csv` or `official_submission.xlsx` for final submission. These files have the strict 9-column format and Phase-1 defaults to stage labels: `TA43 / TA01 / TA03 / TA11 / TN01`. `phase1_predictions.csv`, `candidate_scores.csv`, `eval_report.md`, and `errors.csv` are debug outputs and may contain extra fields such as `record_id`, `stage_code`, `technique_guess`, `confidence`, and candidate diagnostics. If a future Phase-2 round needs technique labels, run with `--submission-label-level technique`; the default is `stage`. `--granularity session` preserves the earlier per-session/group behavior. The evaluator supports the official sample answer column `攻击技术名称或正常流量`. See `README_PHASE1_VM.md` and `docs/offline_debug_playbook.md` for VM usage, offline checks, and output details.
 
 Do not run API batches blindly. Use the current small coverage set first, inspect the reports, then expand only if error analysis improves.
 
