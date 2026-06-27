@@ -29,7 +29,9 @@ If the model run already finished and only the official table needs to be regene
 ```bash
 python3 scripts/export_official_submission.py --output-dir <OUT_FULL> \
   --submission-label-level stage \
-  --pcap-id-source pcap_id
+  --pcap-id-source pcap_id \
+  --official-metadata-source representative \
+  --submission-timezone Asia/Shanghai
 ```
 
 For a technique-level future round:
@@ -39,13 +41,22 @@ python3 scripts/export_official_submission.py --output-dir <OUT_FULL> \
   --submission-label-level technique
 ```
 
+If the organizer provides an empty submission template, prefer copying its metadata columns:
+
+```bash
+python3 scripts/export_official_submission.py --output-dir <OUT_FULL> \
+  --submission-template <TEMPLATE_CSV_OR_XLSX>
+```
+
+`--submission-template` copies only `pcap编号` or `文件名`, `开始时间`, `结束时间`, `源IP`, `源端口`, `目的IP`, and `目的端口`. Any answer/label column in that template is ignored; label and reason still come from the validated model prediction.
+
 ## 2. 常用诊断文件说明
 
 | Path | 用途 |
 |---|---|
 | `run_summary.md` | 总览状态、粒度、prompt/RAG/API 计数、official submission 导出状态和安全边界。 |
 | `phase1_predictions.csv` | 调试用预测表，包含 `pcap_id`、`pcap_name`、`record_id`、`stage_code`、`technique_guess`、`confidence`、`reason` 等扩展字段。不要直接作为官方提交表。 |
-| `official_submission.csv` | 官方提交 CSV，严格 9 列：`pcap编号`、起止时间、五元组、阶段/正常编号、研判理由。Phase-1 默认输出 `TA43/TA01/TA03/TA11/TN01`。 |
+| `official_submission.csv` | 官方提交 CSV，严格 9 列：`pcap编号`、起止时间、五元组、阶段/正常编号、研判理由。Phase-1 默认输出 `TA43/TA01/TA03/TA11/TN01`。无模板时默认用 `--official-metadata-source representative`；有主办方待填写模板时推荐 `--submission-template`。 |
 | `official_submission.xlsx` | 如果 `openpyxl` 可用，同步生成的官方提交 Excel。 |
 | `predictions.jsonl` | 验证后的模型 JSON 输出，一行一条，适合重新导出或排查 JSON 字段。 |
 | `failed_records.jsonl` | API 调用、模型输出解析或字段校验失败的记录。 |
@@ -67,6 +78,8 @@ python3 scripts/export_official_submission.py --output-dir <OUT_FULL> \
 - candidate evidence selection 数量，优先保留 PCAP-level 的代表性强证据。
 - `--granularity pcap|session`，Phase-1 正式提交推荐 `pcap`。
 - `--submission-label-level stage|technique`，Phase-1 默认 `stage`。
+- `--official-metadata-source representative|aggregate`，无模板时推荐 `representative`。
+- `--submission-timezone UTC|Asia/Shanghai`，默认 `Asia/Shanghai`。
 - 实验开关是否启用，例如 critic prompt 生成；不稳定 calibration 不应进入默认推理链路。
 
 不建议在无标签正式数据上盲目调：
@@ -74,6 +87,7 @@ python3 scripts/export_official_submission.py --output-dir <OUT_FULL> \
 - 训练、SFT、LoRA。
 - 大规模规则硬编码。
 - 把正式数据里的单个文件名、IP、hash、路径写死成标签规则。
+- 把答案表作为训练、RAG、prompt 或推理输入；答案只能在推理完成后用于离线评估。
 - aggressive calibration，尤其是把弱证据放大成攻击或正常硬判定。
 
 ## 4. 离线修改 RAG / prompt 的建议

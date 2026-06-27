@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import ipaddress
 import json
 import re
 import sys
@@ -31,6 +32,9 @@ PCAP_ID_SOURCES = {"pcap_id", "pcap_name", "filename_stem"}
 SUBMISSION_LABEL_LEVELS = {"stage", "technique"}
 SUBMISSION_TIMEZONES = {"UTC", "Asia/Shanghai"}
 OFFICIAL_METADATA_SOURCES = {"representative", "aggregate"}
+TEMPLATE_ID_FIELDS = ("pcap编号", "文件名", "pcap", "pcap_id", "pcap_name", "filename", "file_name")
+TEMPLATE_METADATA_FIELDS = ["开始时间", "结束时间", "源IP", "源端口", "目的IP", "目的端口"]
+PLACEHOLDER_IPS = {"1.1.1.1", "2.2.2.2"}
 EPOCH_MIN = 946684800
 EPOCH_MAX = 4102444800
 
@@ -47,12 +51,12 @@ def first_value(row: dict[str, Any], *keys: str) -> Any:
     return ""
 
 
-def first_dict(value: Any) -> dict[str, Any]:
+def dict_items(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, list):
-        for item in value:
-            if isinstance(item, dict):
-                return item
-    return value if isinstance(value, dict) else {}
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        return [value]
+    return []
 
 
 def load_json(path: Path, default: Any = None) -> Any:
@@ -80,6 +84,32 @@ def load_csv(path: Path) -> list[dict[str, Any]]:
         return []
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+def load_xlsx(path: Path) -> list[dict[str, Any]]:
+    try:
+        from openpyxl import load_workbook
+    except ImportError as exc:
+        raise RuntimeError("xlsx submission templates require openpyxl") from exc
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    sheet = workbook.active
+    rows = list(sheet.iter_rows(values_only=True))
+    if not rows:
+        return []
+    headers = [str(value or "").strip() for value in rows[0]]
+    out: list[dict[str, Any]] = []
+    for raw in rows[1:]:
+        item = {headers[index]: value for index, value in enumerate(raw) if index < len(headers) and headers[index]}
+        if any(non_empty(value) for value in item.values()):
+            out.append(item)
+    return out
+
+
+def load_table(path: Path) -> list[dict[str, Any]]:
+    suffix = path.suffix.lower()
+    if suffix in {".xlsx", ".xlsm"}:
+        return load_xlsx(path)
+    return load_csv(path)
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -210,6 +240,40 @@ def cell_value(value: Any) -> str:
     return str(value)
 
 
+def is_placeholder_ip(value: Any) -> bool:
+    return str(value or "").strip() in PLACEHOLDER_IPS
+
+
+def is_ip_like(value: Any) -> bool:
+    try:
+        ipaddress.ip_address(str(value or "").strip())
+        return True
+    except ValueError:
+        return False
+
+
+def endpoint_ip_score(value: Any) -> int:
+    text = str(value or "").strip()
+    if not text or text.lower() == "multiple":
+        return -20
+    if is_placeholder_ip(text):
+        return -120
+    if is_ip_like(text):
+        return 45
+    return 5
+
+
+def endpoint_port_score(value: Any, *, allow_collection: bool = False) -> int:
+    if not non_empty(value):
+        return -8
+    text = str(value).strip().lower()
+    if text == "multiple":
+        return 2 if allow_collection else -4
+    if isinstance(value, list) or "," in text:
+        return 8 if allow_collection else 2
+    return 12
+
+
 def aggregate_metadata(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "start_time": first_value(row, "start_time", "开始时间", "ts"),
@@ -234,6 +298,30 @@ def candidate_metadata(candidate: dict[str, Any]) -> dict[str, Any]:
 
 def merge_metadata(preferred: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
     return {key: preferred.get(key) if non_empty(preferred.get(key)) else fallback.get(key) for key in fallback}
+
+
+def candidate_score(candidate: dict[str, Any], *, scan: bool = False) -> int:
+    metadata = candidate_metadata(candidate)
+    score = 0
+    score += endpoint_ip_score(metadata.get("src_ip"))
+    score += endpoint_ip_score(metadata.get("dst_ip"))
+    score += endpoint_port_score(metadata.get("src_port"))
+    score += endpoint_port_score(metadata.get("dst_port"), allow_collection=scan)
+    if non_empty(metadata.get("start_time")):
+        score += 4
+    if non_empty(metadata.get("end_time")):
+        score += 4
+    if is_placeholder_ip(metadata.get("src_ip")) and is_placeholder_ip(metadata.get("dst_ip")):
+        score -= 80
+    return score
+
+
+def select_best_candidate(candidates: list[dict[str, Any]], *, scan: bool = False) -> dict[str, Any]:
+    if not candidates:
+        return {}
+    first = candidates[0]
+    best = max(enumerate(candidates), key=lambda item: (candidate_score(item[1], scan=scan), -item[0]))[1]
+    return best if candidate_score(best, scan=scan) > candidate_score(first, scan=scan) else first
 
 
 def compact_ports(values: Any, limit: int = 12) -> str:
@@ -283,16 +371,18 @@ def representative_metadata(row: dict[str, Any]) -> dict[str, Any]:
     technique = normalize_technique(first_value(row, "technique_guess", "technique_code", "predicted_code"))
     stage = normalize_stage(first_value(row, "stage_code", "攻击阶段编号或正常流量编号", "stage")) or stage_from_technique(technique)
     if is_port_scan(row, stage, technique):
-        candidate = first_dict((row.get("scan_group_summary") or {}).get("top_records"))
+        candidate = select_best_candidate(dict_items((row.get("scan_group_summary") or {}).get("top_records")), scan=True)
+        if not candidate:
+            candidate = select_best_candidate(dict_items(row.get("top_suspicious_sessions")), scan=True)
         preferred = candidate_metadata(candidate)
         ports = scan_port_metadata(row, candidate)
         if non_empty(ports):
             preferred["dst_port"] = ports
         return merge_metadata(preferred, fallback)
     if stage == "TN01":
-        candidate = first_dict(row.get("representative_benign_context"))
+        candidate = select_best_candidate(dict_items(row.get("representative_benign_context")))
         return merge_metadata(candidate_metadata(candidate), fallback)
-    candidate = first_dict(row.get("top_suspicious_sessions"))
+    candidate = select_best_candidate(dict_items(row.get("top_suspicious_sessions")))
     return merge_metadata(candidate_metadata(candidate), fallback)
 
 
@@ -340,6 +430,71 @@ def parse_summary_lookup(parse_summary_path: Path | None) -> dict[str, str]:
     return out
 
 
+def template_key_values(value: Any) -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    path = Path(text)
+    values = [text, path.name, path.stem]
+    return [item.lower() for item in values if item]
+
+
+def template_lookup_keys(row: dict[str, Any], pcap_id_source: str) -> list[str]:
+    values = [
+        pcap_number(row, pcap_id_source),
+        pcap_number(row, "pcap_id"),
+        pcap_number(row, "pcap_name"),
+        pcap_number(row, "filename_stem"),
+        first_value(row, "pcap_id", "case_id"),
+        first_value(row, "pcap_name", "pcap", "filename", "file_name"),
+    ]
+    keys: list[str] = []
+    for value in values:
+        keys.extend(template_key_values(value))
+    return list(dict.fromkeys(keys))
+
+
+def template_identity(row: dict[str, Any]) -> str:
+    return str(first_value(row, *TEMPLATE_ID_FIELDS)).strip()
+
+
+def load_submission_template(path: Path | None) -> dict[str, dict[str, Any]]:
+    if path is None:
+        return {}
+    if not path.exists():
+        raise FileNotFoundError(f"submission template does not exist: {path}")
+    rows = load_table(path)
+    if not rows:
+        return {}
+    headers = set(rows[0])
+    if not any(field in headers for field in TEMPLATE_ID_FIELDS) or not all(field in headers for field in TEMPLATE_METADATA_FIELDS):
+        return {}
+    lookup: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        identity = template_identity(row)
+        if not identity:
+            continue
+        official_row = {
+            "pcap编号": first_value(row, "pcap编号", "文件名", "pcap", "pcap_id", "pcap_name", "filename", "file_name"),
+            "开始时间": first_value(row, "开始时间"),
+            "结束时间": first_value(row, "结束时间"),
+            "源IP": first_value(row, "源IP"),
+            "源端口": first_value(row, "源端口"),
+            "目的IP": first_value(row, "目的IP"),
+            "目的端口": first_value(row, "目的端口"),
+        }
+        for key in template_key_values(identity):
+            lookup.setdefault(key, official_row)
+    return lookup
+
+
+def matching_template_row(row: dict[str, Any], template_lookup: dict[str, dict[str, Any]], pcap_id_source: str) -> dict[str, Any]:
+    for key in template_lookup_keys(row, pcap_id_source):
+        if key in template_lookup:
+            return template_lookup[key]
+    return {}
+
+
 def merge_prediction_context(
     prediction: dict[str, Any],
     records: dict[str, dict[str, Any]],
@@ -362,6 +517,7 @@ def build_official_rows(
     *,
     records: dict[str, dict[str, Any]] | None = None,
     pcap_names: dict[str, str] | None = None,
+    template_lookup: dict[str, dict[str, Any]] | None = None,
     pcap_id_source: str = "pcap_id",
     submission_label_level: str = "stage",
     submission_timezone: str = "Asia/Shanghai",
@@ -378,10 +534,25 @@ def build_official_rows(
         raise ValueError(f"official_metadata_source must be one of {sorted(OFFICIAL_METADATA_SOURCES)}")
     record_map = records or {}
     pcap_map = pcap_names or {}
+    templates = template_lookup or {}
     rows: list[dict[str, Any]] = []
     for prediction in predictions:
         row = merge_prediction_context(prediction, record_map, pcap_map)
         reason = first_value(row, *DEBUG_REASON_FIELDS)
+        template = matching_template_row(row, templates, pcap_id_source)
+        if template:
+            rows.append({
+                "pcap编号": cell_value(first_value(template, "pcap编号")),
+                "开始时间": cell_value(first_value(template, "开始时间")),
+                "结束时间": cell_value(first_value(template, "结束时间")),
+                "源IP": cell_value(first_value(template, "源IP")),
+                "源端口": cell_value(first_value(template, "源端口")),
+                "目的IP": cell_value(first_value(template, "目的IP")),
+                "目的端口": cell_value(first_value(template, "目的端口")),
+                "攻击阶段编号或正常流量编号": label_for_submission(row, submission_label_level),
+                "研判理由（不计分）": scrub_reason(reason, max_reason_chars),
+            })
+            continue
         metadata = official_metadata(row, official_metadata_source)
         rows.append({
             "pcap编号": pcap_number(row, pcap_id_source),
@@ -438,6 +609,7 @@ def export_official_submission(
     predictions_csv: Path | None = None,
     records_json: Path | None = None,
     parse_summary: Path | None = None,
+    submission_template: Path | None = None,
     output_csv: Path,
     output_xlsx: Path | None = None,
     submission_label_level: str = "stage",
@@ -452,10 +624,12 @@ def export_official_submission(
         predictions, source = load_predictions(predictions_jsonl, predictions_csv)
     records = record_lookup(records_json)
     pcap_names = parse_summary_lookup(parse_summary)
+    template_lookup = load_submission_template(submission_template)
     rows = build_official_rows(
         predictions,
         records=records,
         pcap_names=pcap_names,
+        template_lookup=template_lookup,
         pcap_id_source=pcap_id_source,
         submission_label_level=submission_label_level,
         submission_timezone=submission_timezone,
@@ -476,6 +650,8 @@ def export_official_submission(
         "pcap_id_source": pcap_id_source,
         "submission_timezone": submission_timezone,
         "official_metadata_source": official_metadata_source,
+        "submission_template": str(submission_template) if submission_template else "",
+        "submission_template_used": bool(template_lookup),
     }
 
 
@@ -486,6 +662,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--predictions-csv", type=Path)
     parser.add_argument("--records-json", type=Path)
     parser.add_argument("--parse-summary", type=Path)
+    parser.add_argument("--submission-template", type=Path)
     parser.add_argument("--output-csv", type=Path)
     parser.add_argument("--output-xlsx", type=Path)
     parser.add_argument("--submission-label-level", choices=sorted(SUBMISSION_LABEL_LEVELS), default="stage")
@@ -513,6 +690,7 @@ def main() -> int:
         predictions_csv=predictions_csv,
         records_json=records_json,
         parse_summary=parse_summary,
+        submission_template=args.submission_template,
         output_csv=output_csv,
         output_xlsx=output_xlsx,
         submission_label_level=args.submission_label_level,

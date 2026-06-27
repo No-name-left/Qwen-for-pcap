@@ -380,6 +380,53 @@ class Phase1PromptTests(unittest.TestCase):
         self.assertEqual(rows[0]["目的IP"], "94.63.150.20")
         self.assertEqual(rows[0]["目的端口"], "80")
 
+    def test_official_submission_representative_prefers_specific_ip_over_placeholder(self) -> None:
+        record = {
+            "record_id": "phase1_001::pcap",
+            "pcap_id": "phase1_001",
+            "record_type": "pcap",
+            "start_time": 1312967000.0,
+            "end_time": 1312968000.0,
+            "src_ip": "multiple",
+            "src_port": "multiple",
+            "dst_ip": "multiple",
+            "dst_port": "multiple",
+            "top_suspicious_sessions": [
+                {
+                    "record_id": "phase1_001::session::placeholder",
+                    "start_time": 1312967300.0,
+                    "end_time": 1312967301.0,
+                    "src_ip": "1.1.1.1",
+                    "src_port": 4444,
+                    "dst_ip": "2.2.2.2",
+                    "dst_port": 80,
+                },
+                {
+                    "record_id": "phase1_001::session::specific",
+                    "start_time": 1312967328.170871,
+                    "end_time": 1312967328.381522,
+                    "src_ip": "147.32.84.165",
+                    "src_port": 4444,
+                    "dst_ip": "94.63.150.20",
+                    "dst_port": 80,
+                },
+            ],
+        }
+        rows = build_official_rows(
+            [{
+                "record_id": "phase1_001::pcap",
+                "pcap_id": "phase1_001",
+                "stage_code": "TA11",
+                "technique_guess": "TA11_02",
+                "reason": "Suspicious callback.",
+            }],
+            records={record["record_id"]: record},
+        )
+        self.assertEqual(rows[0]["源IP"], "147.32.84.165")
+        self.assertEqual(rows[0]["源端口"], "4444")
+        self.assertEqual(rows[0]["目的IP"], "94.63.150.20")
+        self.assertEqual(rows[0]["目的端口"], "80")
+
     def test_official_submission_aggregate_mode_keeps_multiple(self) -> None:
         record = {
             "record_id": "phase1_001::pcap",
@@ -431,15 +478,26 @@ class Phase1PromptTests(unittest.TestCase):
             "top_dst_ports": [{"value": 22, "count": 3}, {"value": 80, "count": 2}, {"value": 443, "count": 1}],
             "scan_group_summary": {
                 "scan_like_record_count": 1,
-                "top_records": [{
-                    "record_id": "phase1_001::scan_group::000001",
-                    "start_time": 1312967100.0,
-                    "end_time": 1312967110.0,
-                    "src_ip": "10.0.0.5",
-                    "src_port": "multiple",
-                    "dst_ip": "10.0.0.9",
-                    "dst_port": "multiple",
-                }],
+                "top_records": [
+                    {
+                        "record_id": "phase1_001::scan_group::placeholder",
+                        "start_time": 1312967050.0,
+                        "end_time": 1312967060.0,
+                        "src_ip": "1.1.1.1",
+                        "src_port": "multiple",
+                        "dst_ip": "2.2.2.2",
+                        "dst_port": "multiple",
+                    },
+                    {
+                        "record_id": "phase1_001::scan_group::000001",
+                        "start_time": 1312967100.0,
+                        "end_time": 1312967110.0,
+                        "src_ip": "10.0.0.5",
+                        "src_port": "multiple",
+                        "dst_ip": "10.0.0.9",
+                        "dst_port": "multiple",
+                    },
+                ],
             },
         }
         rows = build_official_rows(
@@ -455,6 +513,55 @@ class Phase1PromptTests(unittest.TestCase):
         self.assertEqual(rows[0]["源IP"], "10.0.0.5")
         self.assertEqual(rows[0]["目的IP"], "10.0.0.9")
         self.assertEqual(rows[0]["目的端口"], "22,80,443")
+
+    def test_official_submission_template_copies_metadata_and_ignores_label_column(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            template = root / "template.csv"
+            with template.open("w", encoding="utf-8-sig", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=[
+                    "文件名", "开始时间", "结束时间", "源IP", "源端口", "目的IP", "目的端口",
+                    "攻击技术名称或正常流量",
+                ])
+                writer.writeheader()
+                writer.writerow({
+                    "文件名": "sample01.pcap",
+                    "开始时间": "2024-01-02 03:04:05",
+                    "结束时间": "2024-01-02 03:04:06",
+                    "源IP": "203.0.113.10",
+                    "源端口": "50123",
+                    "目的IP": "198.51.100.20",
+                    "目的端口": "443",
+                    "攻击技术名称或正常流量": "正常流量",
+                })
+            output = root / "official_submission.csv"
+            stats = export_official_submission(
+                predictions=[{
+                    "record_id": "phase1_001::pcap",
+                    "pcap_id": "phase1_001",
+                    "pcap_name": "sample01.pcap",
+                    "stage_code": "TA11",
+                    "technique_guess": "TA11_02",
+                    "reason": "Model predicted callback.",
+                }],
+                output_csv=output,
+                submission_template=template,
+                write_excel=False,
+            )
+
+            self.assertTrue(stats["submission_template_used"])
+            with output.open("r", encoding="utf-8-sig", newline="") as handle:
+                reader = csv.DictReader(handle)
+                self.assertEqual(reader.fieldnames, OFFICIAL_COLUMNS)
+                row = next(reader)
+            self.assertEqual(row["pcap编号"], "sample01.pcap")
+            self.assertEqual(row["开始时间"], "2024-01-02 03:04:05")
+            self.assertEqual(row["源IP"], "203.0.113.10")
+            self.assertEqual(row["源端口"], "50123")
+            self.assertEqual(row["目的IP"], "198.51.100.20")
+            self.assertEqual(row["目的端口"], "443")
+            self.assertEqual(row["攻击阶段编号或正常流量编号"], "TA11")
+            self.assertEqual(row["研判理由（不计分）"], "Model predicted callback.")
 
     def test_official_submission_normal_prefers_benign_context(self) -> None:
         record = {
@@ -605,6 +712,7 @@ class Phase1PromptTests(unittest.TestCase):
                 "pcap_id_source": "pcap_id",
                 "submission_timezone": "Asia/Shanghai",
                 "official_metadata_source": "representative",
+                "submission_template": None,
                 "dry_run": False,
                 "resume": False,
                 "limit": 0,
