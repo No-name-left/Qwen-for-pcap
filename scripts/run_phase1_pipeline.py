@@ -138,6 +138,8 @@ def effective_config(args: argparse.Namespace) -> dict[str, Any]:
         "granularity": config_value(data, args, "granularity", ["PHASE1_GRANULARITY"]),
         "submission_label_level": config_value(data, args, "submission_label_level", ["PHASE1_SUBMISSION_LABEL_LEVEL"]),
         "pcap_id_source": config_value(data, args, "pcap_id_source", ["PHASE1_PCAP_ID_SOURCE"]),
+        "submission_timezone": config_value(data, args, "submission_timezone", ["PHASE1_SUBMISSION_TIMEZONE"]),
+        "official_metadata_source": config_value(data, args, "official_metadata_source", ["PHASE1_OFFICIAL_METADATA_SOURCE"]),
         "dry_run": config_value(data, args, "dry_run", ["PHASE1_DRY_RUN"], as_bool),
         "resume": config_value(data, args, "resume", ["PHASE1_RESUME"], as_bool),
         "limit": config_value(data, args, "limit", ["PHASE1_LIMIT"], int),
@@ -172,6 +174,12 @@ def effective_config(args: argparse.Namespace) -> dict[str, Any]:
     if values["pcap_id_source"] is None:
         values["pcap_id_source"] = "pcap_id"
     values["pcap_id_source"] = str(values["pcap_id_source"]).strip().lower()
+    if values["submission_timezone"] is None:
+        values["submission_timezone"] = "Asia/Shanghai"
+    values["submission_timezone"] = str(values["submission_timezone"]).strip()
+    if values["official_metadata_source"] is None:
+        values["official_metadata_source"] = "representative"
+    values["official_metadata_source"] = str(values["official_metadata_source"]).strip().lower()
     if values["enable_critic"] is None:
         values["enable_critic"] = False
     if values["critic_only_on_conflict"] is None:
@@ -196,6 +204,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--granularity", choices=["pcap", "session"], help="Final output granularity. pcap builds one prompt/prediction per PCAP; session preserves existing per-record behavior.")
     parser.add_argument("--submission-label-level", choices=["stage", "technique"], help="Official submission label granularity. Defaults to stage for Phase-1.")
     parser.add_argument("--pcap-id-source", choices=["pcap_id", "pcap_name", "filename_stem"], help="Official submission pcap编号 source. Defaults to pcap_id.")
+    parser.add_argument("--submission-timezone", choices=["UTC", "Asia/Shanghai"], help="Official submission display timezone. Defaults to Asia/Shanghai.")
+    parser.add_argument("--official-metadata-source", choices=["representative", "aggregate"], help="Official submission time/IP/port source. Defaults to representative sessions.")
     parser.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--limit", type=int)
@@ -227,6 +237,10 @@ def validate_config(config: dict[str, Any]) -> list[Path]:
         raise ValueError("submission_label_level must be either 'stage' or 'technique'")
     if config["pcap_id_source"] not in {"pcap_id", "pcap_name", "filename_stem"}:
         raise ValueError("pcap_id_source must be one of 'pcap_id', 'pcap_name', or 'filename_stem'")
+    if config["submission_timezone"] not in {"UTC", "Asia/Shanghai"}:
+        raise ValueError("submission_timezone must be either 'UTC' or 'Asia/Shanghai'")
+    if config["official_metadata_source"] not in {"representative", "aggregate"}:
+        raise ValueError("official_metadata_source must be either 'representative' or 'aggregate'")
     input_dir = config["input_dir"]
     if not input_dir.is_dir():
         raise FileNotFoundError(f"input directory does not exist: {input_dir}")
@@ -757,6 +771,8 @@ def safe_config_report(config: dict[str, Any]) -> dict[str, Any]:
         "answer_configured": bool(config.get("answer")), "granularity": config.get("granularity", "pcap"),
         "submission_label_level": config.get("submission_label_level", "stage"),
         "pcap_id_source": config.get("pcap_id_source", "pcap_id"),
+        "submission_timezone": config.get("submission_timezone", "Asia/Shanghai"),
+        "official_metadata_source": config.get("official_metadata_source", "representative"),
         "dry_run": config["dry_run"], "resume": config["resume"],
         "limit": config["limit"], "rag_top_k": config["rag_top_k"], "max_prompt_tokens": config["max_prompt_tokens"],
         "request_timeout": config["request_timeout"], "max_retries": config["max_retries"],
@@ -796,7 +812,9 @@ def write_summary(config: dict[str, Any], paths: dict[str, Path], stats: dict[st
         f"- critic_only_on_conflict: `{str(config.get('critic_only_on_conflict', True)).lower()}`", "",
         "## Submission export controls", "",
         f"- submission_label_level: `{config.get('submission_label_level', 'stage')}`",
-        f"- pcap_id_source: `{config.get('pcap_id_source', 'pcap_id')}`", "",
+        f"- pcap_id_source: `{config.get('pcap_id_source', 'pcap_id')}`",
+        f"- submission_timezone: `{config.get('submission_timezone', 'Asia/Shanghai')}`",
+        f"- official_metadata_source: `{config.get('official_metadata_source', 'representative')}`", "",
         "## Parser controls", "",
         f"- prefer_zeek: `{str(config['prefer_zeek']).lower()}`",
         f"- allow_tshark_fallback: `{str(config['allow_tshark_fallback']).lower()}`",
@@ -861,6 +879,8 @@ def main() -> int:
             output_xlsx=paths["official_submission_xlsx"],
             submission_label_level=config["submission_label_level"],
             pcap_id_source=config["pcap_id_source"],
+            submission_timezone=config["submission_timezone"],
+            official_metadata_source=config["official_metadata_source"],
         )
         stats["official_submission_rows"] = export_stats["rows"]
         stats["official_xlsx_written"] = export_stats["xlsx_written"]
