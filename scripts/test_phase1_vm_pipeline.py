@@ -18,7 +18,18 @@ from build_rag_query import detect_confusion_groups, record_terms, targeted_rag_
 from evaluate_phase1_predictions import evaluate
 from export_official_submission import OFFICIAL_COLUMNS, build_official_rows, export_official_submission
 from parse_public_pcaps import discover_pcaps, parse_case
-from run_phase1_pipeline import official_rows, qwen_extra_body, run_api, safe_config_report, validate_prediction, write_candidate_diagnostics
+from run_phase1_pipeline import (
+    apply_shard_to_records,
+    build_rule_direct_prediction,
+    official_rows,
+    qwen_extra_body,
+    rule_direct_allowed,
+    run_api,
+    run_inference,
+    safe_config_report,
+    validate_prediction,
+    write_candidate_diagnostics,
+)
 from technique_profiles import TECHNIQUE_PROFILES, technique_codes, validate_profiles
 
 
@@ -167,6 +178,7 @@ class Phase1PromptTests(unittest.TestCase):
             config = {
                 "dry_run": False, "base_url": "http://127.0.0.1:8000/v1", "api_key": "EMPTY",
                 "request_timeout": 10, "model": "qwen3.5", "resume": False, "max_retries": 0,
+                "api_retries": 0, "api_retry_sleep": 0, "max_api_workers": 1, "max_completion_tokens": 128,
                 "enable_thinking": False,
             }
             records = [{"record_id": "r1", "pcap_id": "p1", "record_type": "session"}]
@@ -180,6 +192,182 @@ class Phase1PromptTests(unittest.TestCase):
         self.assertEqual(failures, [])
         self.assertEqual(captured[0]["extra_body"], {"chat_template_kwargs": {"enable_thinking": False}})
         self.assertNotIn("enable_thinking", captured[0]["extra_body"])
+        self.assertEqual(captured[0]["max_tokens"], 128)
+        self.assertEqual(results[0]["response_meta"]["inference_source"], "llm")
+        self.assertEqual(results[0]["response_meta"]["total_tokens"], 12)
+
+    def test_high_confidence_skip_routes_rule_direct_prediction(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            record = {
+                "record_id": "phase1_001::pcap",
+                "pcap_id": "phase1_001",
+                "record_type": "pcap",
+                "primary_rule_candidate": "TA11_02",
+                "candidate_technique_scores": {"TA11_02": 9.5, "TN01_01": 1.0},
+                "score_margin": 8.5,
+                "evidence_strength": "strong",
+                "rule_evidence": ["Fixed callback endpoint and periodic timing are visible."],
+            }
+            config = {
+                "dry_run": False,
+                "output_dir": root,
+                "resume": False,
+                "llm_routing": "high-confidence-skip",
+                "rule_direct_min_score": 7.0,
+                "rule_direct_min_margin": 2.5,
+                "rule_direct_min_strength": "strong",
+                "rule_direct_allow_normal": False,
+                "rule_direct_max_conflicts": 0,
+                "compact_reason": False,
+                "estimated_llm_latency": 32.8,
+            }
+            paths = pipeline.step_paths(root)
+            results, failures, api_calls, stats, routing_rows = run_inference(config, paths, [record], [])
+
+        self.assertEqual(failures, [])
+        self.assertEqual(api_calls, 0)
+        self.assertEqual(stats["rule_direct_count"], 1)
+        self.assertEqual(stats["llm_count"], 0)
+        self.assertEqual(results[0]["stage_code"], "TA11")
+        self.assertEqual(results[0]["technique_guess"], "TA11_02")
+        self.assertEqual(results[0]["response_meta"]["inference_source"], "rule_direct")
+        self.assertEqual(routing_rows[0]["route"], "rule_direct")
+
+    def test_conflict_flag_prevents_rule_direct_skip(self) -> None:
+        record = {
+            "record_id": "phase1_001::pcap",
+            "pcap_id": "phase1_001",
+            "record_type": "pcap",
+            "primary_rule_candidate": "TA11_02",
+            "candidate_technique_scores": {"TA11_02": 9.5, "TN01_01": 1.0},
+            "score_margin": 8.5,
+            "evidence_strength": "strong",
+            "rule_conflict_flags": ["payload_observability_gap"],
+        }
+        config = {
+            "rule_direct_min_score": 7.0,
+            "rule_direct_min_margin": 2.5,
+            "rule_direct_min_strength": "strong",
+            "rule_direct_allow_normal": False,
+            "rule_direct_max_conflicts": 0,
+        }
+        self.assertFalse(rule_direct_allowed(record, config))
+
+    def test_resume_skips_existing_predictions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            prediction = {
+                "record_id": "phase1_001::pcap",
+                "pcap_id": "phase1_001",
+                "record_type": "pcap",
+                "stage_code": "TA11",
+                "technique_guess": "TA11_02",
+                "confidence": 0.84,
+                "reason": "Existing validated prediction.",
+                "response_meta": {"inference_source": "llm", "request_id": "cached"},
+            }
+            (root / "predictions.jsonl").write_text(json.dumps(prediction, ensure_ascii=False) + "\n", encoding="utf-8")
+            record = {"record_id": "phase1_001::pcap", "pcap_id": "phase1_001", "record_type": "pcap"}
+            config = {
+                "dry_run": False,
+                "output_dir": root,
+                "resume": True,
+                "llm_routing": "all",
+                "estimated_llm_latency": 32.8,
+                "compact_reason": False,
+            }
+            paths = pipeline.step_paths(root)
+            with patch.object(pipeline, "run_api", side_effect=AssertionError("API should not run for completed resume rows")):
+                results, failures, api_calls, stats, routing_rows = run_inference(config, paths, [record], [])
+
+        self.assertEqual(failures, [])
+        self.assertEqual(api_calls, 0)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(stats["skipped_completed"], 1)
+        self.assertTrue(stats["resumed_from_existing_predictions"])
+        self.assertEqual(routing_rows[0]["status"], "skipped_completed")
+
+    def test_shard_split_is_stable_and_non_overlapping(self) -> None:
+        records = [{"record_id": f"r{index}"} for index in range(5)]
+        first = apply_shard_to_records(records, num_shards=2, shard_index=0)
+        second = apply_shard_to_records(records, num_shards=2, shard_index=1)
+        self.assertEqual([item["record_id"] for item in first], ["r0", "r2", "r4"])
+        self.assertEqual([item["record_id"] for item in second], ["r1", "r3"])
+        self.assertFalse({item["record_id"] for item in first} & {item["record_id"] for item in second})
+
+    def test_llm_routing_none_does_not_initialize_api(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            record = {
+                "record_id": "phase1_001::pcap",
+                "pcap_id": "phase1_001",
+                "record_type": "pcap",
+                "candidate_technique_scores": {"TA43_01": 4.0, "TN01_01": 1.0},
+                "rule_evidence": ["Port fanout is visible."],
+            }
+            config = {
+                "dry_run": False,
+                "output_dir": root,
+                "resume": False,
+                "llm_routing": "none",
+                "compact_reason": False,
+                "estimated_llm_latency": 32.8,
+            }
+            paths = pipeline.step_paths(root)
+            with patch.object(pipeline, "run_api", side_effect=AssertionError("API should not initialize in llm-routing none")):
+                results, failures, api_calls, stats, _ = run_inference(config, paths, [record], [])
+
+        self.assertEqual(failures, [])
+        self.assertEqual(api_calls, 0)
+        self.assertEqual(stats["rule_direct_count"], 1)
+        self.assertEqual(results[0]["technique_guess"], "TA43_01")
+        self.assertEqual(results[0]["response_meta"]["inference_source"], "rule_direct")
+
+    def test_failed_routed_record_does_not_drop_successful_rule_direct_result(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            direct = {
+                "record_id": "phase1_001::pcap",
+                "pcap_id": "phase1_001",
+                "record_type": "pcap",
+                "primary_rule_candidate": "TA43_01",
+                "candidate_technique_scores": {"TA43_01": 9.0, "TN01_01": 0.0},
+                "score_margin": 9.0,
+                "evidence_strength": "strong",
+                "rule_evidence": ["High fanout scan behavior."],
+            }
+            missing_prompt = {
+                "record_id": "phase1_002::pcap",
+                "pcap_id": "phase1_002",
+                "record_type": "pcap",
+                "primary_rule_candidate": "TA11_02",
+                "candidate_technique_scores": {"TA11_02": 3.0, "TN01_01": 1.0},
+                "score_margin": 2.0,
+                "evidence_strength": "medium",
+            }
+            config = {
+                "dry_run": False,
+                "output_dir": root,
+                "resume": False,
+                "llm_routing": "high-confidence-skip",
+                "rule_direct_min_score": 7.0,
+                "rule_direct_min_margin": 2.5,
+                "rule_direct_min_strength": "strong",
+                "rule_direct_allow_normal": False,
+                "rule_direct_max_conflicts": 0,
+                "compact_reason": False,
+                "estimated_llm_latency": 32.8,
+            }
+            paths = pipeline.step_paths(root)
+            results, failures, api_calls, stats, _ = run_inference(config, paths, [direct, missing_prompt], [])
+
+        self.assertEqual(api_calls, 0)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["record_id"], "phase1_001::pcap")
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]["record_id"], "phase1_002::pcap")
+        self.assertEqual(stats["failed_count"], 1)
 
     def test_pcap_level_records_aggregate_one_record_per_pcap(self) -> None:
         cards = [
@@ -637,6 +825,42 @@ class Phase1PromptTests(unittest.TestCase):
         official = build_official_rows(rows)
         self.assertEqual(set(official[0]), set(OFFICIAL_COLUMNS))
 
+    def test_official_submission_exports_mixed_rule_direct_and_llm_predictions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            csv_path = root / "official_submission.csv"
+            stats = export_official_submission(
+                predictions=[
+                    {
+                        "record_id": "phase1_001::pcap",
+                        "pcap_id": "phase1_001",
+                        "stage_code": "TA43",
+                        "technique_guess": "TA43_01",
+                        "reason": "Rule-direct scan evidence.",
+                        "response_meta": {"inference_source": "rule_direct"},
+                    },
+                    {
+                        "record_id": "phase1_002::pcap",
+                        "pcap_id": "phase1_002",
+                        "stage_code": "TA11",
+                        "technique_guess": "TA11_02",
+                        "reason": "LLM callback evidence.",
+                        "response_meta": {"inference_source": "llm"},
+                    },
+                ],
+                output_csv=csv_path,
+                output_xlsx=root / "official_submission.xlsx",
+                write_excel=False,
+            )
+            self.assertEqual(stats["rows"], 2)
+            with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                reader = csv.DictReader(handle)
+                self.assertEqual(reader.fieldnames, OFFICIAL_COLUMNS)
+                rows = list(reader)
+        self.assertEqual(rows[0]["攻击阶段编号或正常流量编号"], "TA43")
+        self.assertEqual(rows[1]["攻击阶段编号或正常流量编号"], "TA11")
+        self.assertNotIn("response_meta", rows[0])
+
     def test_output_dir_export_uses_pipeline_layout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -776,6 +1000,8 @@ class Phase1PromptTests(unittest.TestCase):
             self.assertEqual(status, 0)
             self.assertTrue((output / "official_submission.csv").exists())
             self.assertTrue((output / "official_submission.xlsx").exists())
+            self.assertTrue((output / "routing_summary.csv").exists())
+            self.assertTrue((output / "inference_plan_report.md").exists())
             self.assertFalse(any(label.startswith("evaluate") for label in run_labels))
             with (output / "official_submission.csv").open("r", encoding="utf-8-sig", newline="") as handle:
                 row = next(csv.DictReader(handle))

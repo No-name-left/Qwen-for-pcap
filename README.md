@@ -118,6 +118,26 @@ The Phase-1 VM runner defaults to `--granularity pcap`, the recommended mode for
 
 Use `official_submission.csv` or `official_submission.xlsx` for final submission. These files have the strict 9-column format and Phase-1 defaults to stage labels: `TA43 / TA01 / TA03 / TA11 / TN01`. Without an official empty template, use the default `--official-metadata-source representative`; if the organizer provides a fill-in template, prefer `--submission-template <csv/xlsx>` so the official metadata columns are copied and only label/reason are filled. `phase1_predictions.csv`, `candidate_scores.csv`, `eval_report.md`, and `errors.csv` are debug outputs and may contain extra fields such as `record_id`, `stage_code`, `technique_guess`, `confidence`, and candidate diagnostics. If a future Phase-2 round needs technique labels, run with `--submission-label-level technique`; the default is `stage`. Do not use answer tables as training data or prompt/inference input. `--granularity session` preserves the earlier per-session/group behavior. The evaluator supports the official sample answer column `攻击技术名称或正常流量` only after inference. See `README_PHASE1_VM.md` and `docs/offline_debug_playbook.md` for VM usage, offline checks, and output details.
 
+Large official runs keep the old behavior by default: `--max-api-workers 1`, `--llm-routing all`, and `--resume` off unless explicitly requested. For 10 万 PCAP scale, first run dry-run and small live batches, inspect `routing_summary.csv` and `inference_plan_report.md`, then enable:
+
+```bash
+bash run_phase1_vm.sh \
+  --input <PCAP_DIR> \
+  --output-dir <OUT_FULL> \
+  --granularity pcap \
+  --base-url http://127.0.0.1:8000/v1 \
+  --model qwen3.5 \
+  --api-key EMPTY \
+  --llm-routing high-confidence-skip \
+  --max-api-workers 2 \
+  --resume \
+  --official-metadata-source representative \
+  --submission-timezone Asia/Shanghai \
+  --no-dry-run
+```
+
+Use `--max-api-workers 4` only after a 100/1000-record throughput test shows the local vLLM service remains stable. `--llm-routing none` is for smoke/extreme offline runs and does not initialize the API. If splitting across shards, merge with `scripts/merge_phase1_shards.py` and the full dry-run `session_cards/selected_records.json`.
+
 Do not run API batches blindly. Use the current small coverage set first, inspect the reports, then expand only if error analysis improves.
 
 Real API execution is additionally gated by a passing readiness report, `RUN_REAL_API_TEST=1`, and at most two paired records (four calls). `scripts/estimate_api_eval_cost.py` estimates larger plans without making calls.

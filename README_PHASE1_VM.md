@@ -92,9 +92,93 @@ bash run_phase1_vm.sh \
   --no-dry-run
 ```
 
-省略 `--output-dir` 时，入口脚本使用 `phase1_run_<UTC时间戳>`。Web 终端中断后，使用同一个显式输出目录和 `--resume` 重跑；解析、cards、RAG、prompt 与已验证 API 结果会按基本完整性检查跳过。使用 `--no-resume` 强制重建。
+省略 `--output-dir` 时，入口脚本使用 `phase1_run_<UTC时间戳>`。默认 `resume: false`，保持一次干净运行；Web 终端中断后，使用同一个显式输出目录和 `--resume` 重跑，解析、cards、RAG、prompt 与已验证 API 结果会按基本完整性检查跳过。使用 `--no-resume` 强制重建。
 
-配置优先级为 CLI、环境变量、`configs/phase1_vm.yaml`。可用参数还包括 `--limit`、`--rag-top-k`、`--max-prompt-tokens`、`--request-timeout` 和 `--max-retries`。
+配置优先级为 CLI、环境变量、`configs/phase1_vm.yaml`。可用参数还包括 `--limit`、`--rag-top-k`、`--max-prompt-tokens`、`--request-timeout`、`--max-retries`、`--api-retries`、`--api-retry-sleep`、`--max-api-workers`、`--llm-routing`、`--num-shards` 和 `--shard-index`。
+
+## 4.1 大规模正式运行加速
+
+默认仍是旧行为：`--max-api-workers 1` 串行调用、`--llm-routing all` 所有记录送 LLM、`--resume` 不自动启用。正式约 10 万 PCAP 时建议按下面流程逐步放大：
+
+```bash
+# 1. 先 dry-run，看解析、RAG、prompt 和 routing 报告骨架
+bash run_phase1_vm.sh \
+  --input <PCAP_DIR> \
+  --output-dir /data/outputs/qwen_for_pcap/phase1_dryrun \
+  --granularity pcap \
+  --dry-run
+
+# 2. 小样本测基础吞吐
+bash run_phase1_vm.sh \
+  --input <PCAP_DIR> \
+  --output-dir /data/outputs/qwen_for_pcap/phase1_limit100 \
+  --granularity pcap \
+  --base-url http://127.0.0.1:8000/v1 \
+  --model qwen3.5 \
+  --api-key EMPTY \
+  --limit 100 \
+  --max-api-workers 1 \
+  --no-dry-run
+
+# 3. 对比 worker=2/4，只在 vLLM 稳定时提高并发
+bash run_phase1_vm.sh \
+  --input <PCAP_DIR> \
+  --output-dir /data/outputs/qwen_for_pcap/phase1_limit100_w2 \
+  --granularity pcap \
+  --base-url http://127.0.0.1:8000/v1 \
+  --model qwen3.5 \
+  --api-key EMPTY \
+  --limit 100 \
+  --max-api-workers 2 \
+  --no-dry-run
+```
+
+大规模推荐命令：
+
+```bash
+bash run_phase1_vm.sh \
+  --input <PCAP_DIR> \
+  --output-dir /data/outputs/qwen_for_pcap/phase1_full \
+  --granularity pcap \
+  --base-url http://127.0.0.1:8000/v1 \
+  --model qwen3.5 \
+  --api-key EMPTY \
+  --llm-routing high-confidence-skip \
+  --rule-direct-min-score 7.0 \
+  --rule-direct-min-margin 2.5 \
+  --rule-direct-min-strength strong \
+  --max-api-workers 2 \
+  --api-retries 2 \
+  --api-retry-sleep 3 \
+  --resume \
+  --official-metadata-source representative \
+  --submission-timezone Asia/Shanghai \
+  --no-dry-run
+```
+
+`high-confidence-skip` 只对强证据、低冲突、margin 足够且默认非正常流量的 `primary_rule_candidate` 直出；有 `weak_attack_uncertainty`、`payload_observability_gap`、`model_prediction_differs_from_primary_rule_candidate` 等冲突标记的记录仍送 LLM。`--rule-direct-allow-normal` 默认关闭，避免把边界攻击误直出为正常。`--llm-routing none` 完全不初始化 API，只适合 smoke、极限离线或人工抽查，不是默认提交建议。
+
+每次运行都会生成：
+
+```text
+routing_summary.csv
+inference_plan_report.md
+```
+
+其中包含 `rule_direct_count`、`llm_count`、`failed_count`、平均 latency、估算串行 LLM 天数、实际吞吐、worker 数、resume 和 shard 信息。断点续跑时 `run_summary.md` 会记录 `resumed_from_existing_predictions`、`skipped_completed` 和 `remaining_to_infer`。
+
+如需分片运行，`--num-shards N --shard-index I` 使用 0-based shard index，并在 `session_cards/selected_records.json` 中只保留本片记录。合并时用 dry-run 或全量未分片输出里的完整 `selected_records.json`：
+
+```bash
+python3 scripts/merge_phase1_shards.py \
+  --shard-output-dir /data/outputs/qwen_for_pcap/shard_0 \
+  --shard-output-dir /data/outputs/qwen_for_pcap/shard_1 \
+  --output-dir /data/outputs/qwen_for_pcap/merged \
+  --records-json /data/outputs/qwen_for_pcap/phase1_dryrun/session_cards/selected_records.json \
+  --parse-summary /data/outputs/qwen_for_pcap/phase1_dryrun/parsed/parse_all_summary.json \
+  --official-metadata-source representative \
+  --submission-timezone Asia/Shanghai
+```
 
 默认输出粒度是 `granularity: pcap`，也是当前 Phase-1 样例推荐模式：每个输入 PCAP 汇总为 1 条 Phase-1 记录、1 个 prompt、1 个预测，适合官方答案表按“1 PCAP -> 1 结果”对齐。底层仍会先生成 session cards、scan/auth/C2 groups 和 session/group classification records，只是这些 session/group evidence 会作为 PCAP-level 判断证据，再聚合到 `session_cards/pcap_level_records.json`。如需保留旧的逐 session/group 输出，可使用：
 
@@ -184,6 +268,8 @@ VM 默认 Docker image 为 `public.ecr.aws/zeek/zeek:8.0.6-arm64`。可用 `--ze
 | `predictions.jsonl` | stage-first 结构及可选 `technique_guess` |
 | `run_summary.md` / `run.log` | 汇总与逐步日志，不含 API key |
 | `failed_records.jsonl` | API 或 JSON 解析失败记录 |
+| `routing_summary.csv` | 每条记录最终路由：resume skip、rule_direct 或 llm，以及 score、margin、strength、conflict flags 和 latency |
+| `inference_plan_report.md` | 大规模运行摘要：rule-direct/LLM 计数、失败数、吞吐、平均 latency、估算串行天数、worker、resume、shard 信息 |
 | `parse_errors.jsonl` | Zeek/TShark 警告和解析失败 |
 | `session_cards/pcap_level_records.json` | PCAP 模式的一包一条聚合记录，包含 bounded/redacted 摘要、代表性证据、`candidate_technique_scores` / `primary_rule_candidate` / `rule_evidence` |
 | `session_cards/selected_records.json` | 进入 RAG、prompt 和 API 的最终记录；随 `granularity` 切换为 PCAP 或 session/group |

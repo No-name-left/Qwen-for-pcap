@@ -17,12 +17,22 @@ ls <OUT_DRY>/prompt_samples
 # 3. 小规模模型测试
 bash run_phase1_vm.sh --input <PCAP_DIR> --output-dir <OUT_API_3> --granularity pcap --base-url http://127.0.0.1:8000/v1 --model qwen3.5 --api-key EMPTY --limit 3 --no-dry-run
 
-# 4. 全量运行
-bash run_phase1_vm.sh --input <PCAP_DIR> --output-dir <OUT_FULL> --granularity pcap --base-url http://127.0.0.1:8000/v1 --model qwen3.5 --api-key EMPTY --no-dry-run
+# 4. 先用 100/1000 条测吞吐和 vLLM 稳定性
+bash run_phase1_vm.sh --input <PCAP_DIR> --output-dir <OUT_API_100> --granularity pcap --base-url http://127.0.0.1:8000/v1 --model qwen3.5 --api-key EMPTY --limit 100 --max-api-workers 1 --no-dry-run
+cat <OUT_API_100>/inference_plan_report.md
+cat <OUT_API_100>/routing_summary.csv
 
-# 5. 查看提交文件
+# 5. 对比并发 worker=2/4
+bash run_phase1_vm.sh --input <PCAP_DIR> --output-dir <OUT_API_100_W2> --granularity pcap --base-url http://127.0.0.1:8000/v1 --model qwen3.5 --api-key EMPTY --limit 100 --max-api-workers 2 --no-dry-run
+
+# 6. 全量运行：显式启用高置信规则直出、并发和断点续跑
+bash run_phase1_vm.sh --input <PCAP_DIR> --output-dir <OUT_FULL> --granularity pcap --base-url http://127.0.0.1:8000/v1 --model qwen3.5 --api-key EMPTY --llm-routing high-confidence-skip --max-api-workers 2 --resume --official-metadata-source representative --submission-timezone Asia/Shanghai --no-dry-run
+
+# 7. 查看提交文件
 cat <OUT_FULL>/official_submission.csv
 ```
+
+Default behavior stays conservative: `--max-api-workers 1`, `--llm-routing all`, and resume off unless `--resume` is provided. Use `--max-api-workers 4` only after small-batch latency and failure rates look stable. `--llm-routing none` never initializes the API and is useful for smoke/extreme offline checks, not for default quality runs.
 
 If the model run already finished and only the official table needs to be regenerated:
 
@@ -50,6 +60,24 @@ python3 scripts/export_official_submission.py --output-dir <OUT_FULL> \
 
 `--submission-template` copies only `pcap编号` or `文件名`, `开始时间`, `结束时间`, `源IP`, `源端口`, `目的IP`, and `目的端口`. Any answer/label column in that template is ignored; label and reason still come from the validated model prediction.
 
+For shard runs, use 0-based shard indexes and merge with the full dry-run selected records:
+
+```bash
+# Example: run shard 0 and 1 separately
+bash run_phase1_vm.sh --input <PCAP_DIR> --output-dir <OUT_SHARD_0> --granularity pcap --num-shards 2 --shard-index 0 --base-url http://127.0.0.1:8000/v1 --model qwen3.5 --api-key EMPTY --llm-routing high-confidence-skip --max-api-workers 2 --resume --no-dry-run
+bash run_phase1_vm.sh --input <PCAP_DIR> --output-dir <OUT_SHARD_1> --granularity pcap --num-shards 2 --shard-index 1 --base-url http://127.0.0.1:8000/v1 --model qwen3.5 --api-key EMPTY --llm-routing high-confidence-skip --max-api-workers 2 --resume --no-dry-run
+
+# Merge predictions in original selected_records order and rebuild official submission
+python3 scripts/merge_phase1_shards.py \
+  --shard-output-dir <OUT_SHARD_0> \
+  --shard-output-dir <OUT_SHARD_1> \
+  --output-dir <OUT_MERGED> \
+  --records-json <OUT_DRY>/session_cards/selected_records.json \
+  --parse-summary <OUT_DRY>/parsed/parse_all_summary.json \
+  --official-metadata-source representative \
+  --submission-timezone Asia/Shanghai
+```
+
 ## 2. 常用诊断文件说明
 
 | Path | 用途 |
@@ -60,6 +88,8 @@ python3 scripts/export_official_submission.py --output-dir <OUT_FULL> \
 | `official_submission.xlsx` | 如果 `openpyxl` 可用，同步生成的官方提交 Excel。 |
 | `predictions.jsonl` | 验证后的模型 JSON 输出，一行一条，适合重新导出或排查 JSON 字段。 |
 | `failed_records.jsonl` | API 调用、模型输出解析或字段校验失败的记录。 |
+| `routing_summary.csv` | 每条记录最终路由：resume skip、rule_direct 或 llm，并保留 score、margin、strength、conflict flags、latency。 |
+| `inference_plan_report.md` | 大规模运行摘要：rule-direct/LLM 计数、失败数、吞吐、平均 latency、估算串行天数、worker、resume、shard。 |
 | `parse_errors.jsonl` | Zeek/TShark warning、fallback、supplement 失败等解析问题。 |
 | `candidate_scores.csv` | 规则候选、top candidates、score margin、evidence strength、预测结果和 conflict flags。 |
 | `candidate_score_report.md` | 候选评分和冲突复核数量摘要。 |
@@ -80,6 +110,11 @@ python3 scripts/export_official_submission.py --output-dir <OUT_FULL> \
 - `--submission-label-level stage|technique`，Phase-1 默认 `stage`。
 - `--official-metadata-source representative|aggregate`，无模板时推荐 `representative`。
 - `--submission-timezone UTC|Asia/Shanghai`，默认 `Asia/Shanghai`。
+- `--max-api-workers`，先用 1/2/4 小批量对比吞吐和失败率。
+- `--llm-routing all|high-confidence-skip|none`，默认 `all`；大规模可试 `high-confidence-skip`，`none` 只适合 smoke。
+- `--rule-direct-min-score`、`--rule-direct-min-margin`、`--rule-direct-min-strength`、`--rule-direct-max-conflicts`，只在无标签情况下做保守阈值调整。
+- `--num-shards` / `--shard-index`，多进程或多 VM 分片时使用。
+- `--max-completion-tokens` 和 `--compact-reason`，可减少输出长度；默认不改变 prompt 内容。
 - 实验开关是否启用，例如 critic prompt 生成；不稳定 calibration 不应进入默认推理链路。
 
 不建议在无标签正式数据上盲目调：
