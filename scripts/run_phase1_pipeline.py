@@ -9,7 +9,9 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -42,7 +44,18 @@ CANDIDATE_SCORE_FIELDS = [
     "predicted_technique", "predicted_stage", "confidence",
     "conflict_review_needed", "conflict_flags", "rule_evidence", "counter_evidence",
 ]
+ROUTING_FIELDS = [
+    "record_id", "pcap_id", "record_type", "route", "status", "inference_source",
+    "primary_rule_candidate", "primary_rule_score", "score_margin", "evidence_strength",
+    "conflict_count", "conflict_flags", "reason", "latency_seconds",
+]
 PCAP_SUFFIXES = {".pcap", ".pcapng", ".cap"}
+EVIDENCE_STRENGTH_ORDER = {"weak": 1, "medium": 2, "strong": 3}
+BLOCK_RULE_DIRECT_FLAGS = {
+    "weak_attack_uncertainty",
+    "payload_observability_gap",
+    "model_prediction_differs_from_primary_rule_candidate",
+}
 
 
 def utc_now() -> str:
@@ -78,6 +91,24 @@ def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not path.exists():
+        return rows
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                item = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict):
+                rows.append(item)
+    return rows
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -148,6 +179,20 @@ def effective_config(args: argparse.Namespace) -> dict[str, Any]:
         "max_prompt_tokens": config_value(data, args, "max_prompt_tokens", ["PHASE1_MAX_PROMPT_TOKENS", "LLM_MAX_PROMPT_TOKENS"], int),
         "request_timeout": config_value(data, args, "request_timeout", ["PHASE1_REQUEST_TIMEOUT", "LLM_REQUEST_TIMEOUT"], float),
         "max_retries": config_value(data, args, "max_retries", ["PHASE1_MAX_RETRIES"], int),
+        "api_retries": config_value(data, args, "api_retries", ["PHASE1_API_RETRIES"], int),
+        "api_retry_sleep": config_value(data, args, "api_retry_sleep", ["PHASE1_API_RETRY_SLEEP"], float),
+        "max_api_workers": config_value(data, args, "max_api_workers", ["PHASE1_MAX_API_WORKERS"], int),
+        "num_shards": config_value(data, args, "num_shards", ["PHASE1_NUM_SHARDS"], int),
+        "shard_index": config_value(data, args, "shard_index", ["PHASE1_SHARD_INDEX"], int),
+        "llm_routing": config_value(data, args, "llm_routing", ["PHASE1_LLM_ROUTING"]),
+        "rule_direct_min_score": config_value(data, args, "rule_direct_min_score", ["PHASE1_RULE_DIRECT_MIN_SCORE"], float),
+        "rule_direct_min_margin": config_value(data, args, "rule_direct_min_margin", ["PHASE1_RULE_DIRECT_MIN_MARGIN"], float),
+        "rule_direct_min_strength": config_value(data, args, "rule_direct_min_strength", ["PHASE1_RULE_DIRECT_MIN_STRENGTH"]),
+        "rule_direct_allow_normal": config_value(data, args, "rule_direct_allow_normal", ["PHASE1_RULE_DIRECT_ALLOW_NORMAL"], as_bool),
+        "rule_direct_max_conflicts": config_value(data, args, "rule_direct_max_conflicts", ["PHASE1_RULE_DIRECT_MAX_CONFLICTS"], int),
+        "max_completion_tokens": config_value(data, args, "max_completion_tokens", ["PHASE1_MAX_COMPLETION_TOKENS", "LLM_MAX_COMPLETION_TOKENS"], int),
+        "compact_reason": config_value(data, args, "compact_reason", ["PHASE1_COMPACT_REASON"], as_bool),
+        "estimated_llm_latency": config_value(data, args, "estimated_llm_latency", ["PHASE1_ESTIMATED_LLM_LATENCY"], float),
         "enable_thinking": config_value(data, args, "enable_thinking", ["PHASE1_ENABLE_THINKING", "LLM_ENABLE_THINKING", "ENABLE_THINKING"], as_bool),
         "prefer_zeek": config_value(data, args, "prefer_zeek", ["PHASE1_PREFER_ZEEK"], as_bool),
         "allow_tshark_fallback": config_value(data, args, "allow_tshark_fallback", ["PHASE1_ALLOW_TSHARK_FALLBACK"], as_bool),
@@ -181,6 +226,38 @@ def effective_config(args: argparse.Namespace) -> dict[str, Any]:
     if values["official_metadata_source"] is None:
         values["official_metadata_source"] = "representative"
     values["official_metadata_source"] = str(values["official_metadata_source"]).strip().lower()
+    if values["resume"] is None:
+        values["resume"] = False
+    if values["api_retries"] is None:
+        values["api_retries"] = values["max_retries"] if values["max_retries"] is not None else 2
+    if values["api_retry_sleep"] is None:
+        values["api_retry_sleep"] = 3.0
+    if values["max_api_workers"] is None:
+        values["max_api_workers"] = 1
+    if values["num_shards"] is None:
+        values["num_shards"] = 1
+    if values["shard_index"] is None:
+        values["shard_index"] = 0
+    if values["llm_routing"] is None:
+        values["llm_routing"] = "all"
+    values["llm_routing"] = str(values["llm_routing"]).strip().lower()
+    if values["rule_direct_min_score"] is None:
+        values["rule_direct_min_score"] = 7.0
+    if values["rule_direct_min_margin"] is None:
+        values["rule_direct_min_margin"] = 2.5
+    if values["rule_direct_min_strength"] is None:
+        values["rule_direct_min_strength"] = "strong"
+    values["rule_direct_min_strength"] = str(values["rule_direct_min_strength"]).strip().lower()
+    if values["rule_direct_allow_normal"] is None:
+        values["rule_direct_allow_normal"] = False
+    if values["rule_direct_max_conflicts"] is None:
+        values["rule_direct_max_conflicts"] = 0
+    if values["max_completion_tokens"] is None:
+        values["max_completion_tokens"] = 384
+    if values["compact_reason"] is None:
+        values["compact_reason"] = False
+    if values["estimated_llm_latency"] is None:
+        values["estimated_llm_latency"] = 32.8
     if values["enable_critic"] is None:
         values["enable_critic"] = False
     if values["critic_only_on_conflict"] is None:
@@ -216,6 +293,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-prompt-tokens", type=int)
     parser.add_argument("--request-timeout", type=float)
     parser.add_argument("--max-retries", type=int)
+    parser.add_argument("--api-retries", type=int, help="Per-record OpenAI-compatible API retries. Defaults to 2.")
+    parser.add_argument("--api-retry-sleep", type=float, help="Seconds to wait between API retry attempts. Defaults to 3.")
+    parser.add_argument("--max-api-workers", type=int, help="Concurrent API workers. Defaults to 1 for legacy serial behavior.")
+    parser.add_argument("--num-shards", type=int, help="Total stable shards to split selected records into.")
+    parser.add_argument("--shard-index", type=int, help="Zero-based shard index to run when --num-shards is set.")
+    parser.add_argument("--llm-routing", choices=["all", "high-confidence-skip", "none"], help="LLM routing mode. Defaults to all.")
+    parser.add_argument("--rule-direct-min-score", type=float)
+    parser.add_argument("--rule-direct-min-margin", type=float)
+    parser.add_argument("--rule-direct-min-strength", choices=["strong", "medium", "weak"])
+    parser.add_argument("--rule-direct-allow-normal", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--rule-direct-max-conflicts", type=int)
+    parser.add_argument("--max-completion-tokens", type=int, help="Maximum completion tokens for live LLM calls.")
+    parser.add_argument("--compact-reason", action=argparse.BooleanOptionalAction, default=None, help="Shorten validated reasons in prediction outputs.")
+    parser.add_argument("--estimated-llm-latency", type=float, help="Seconds/record used for serial runtime estimates when no live latency is available.")
     parser.add_argument("--enable-thinking", dest="enable_thinking", action="store_true", default=None, help="Enable Qwen chat-template thinking mode.")
     parser.add_argument("--disable-thinking", dest="enable_thinking", action="store_false", default=None, help="Disable Qwen chat-template thinking mode for strict JSON output.")
     parser.add_argument("--prefer-zeek", action=argparse.BooleanOptionalAction, default=None, help="Prefer system/Docker Zeek before TShark fallback.")
@@ -244,6 +335,20 @@ def validate_config(config: dict[str, Any]) -> list[Path]:
         raise ValueError("submission_timezone must be either 'UTC' or 'Asia/Shanghai'")
     if config["official_metadata_source"] not in {"representative", "aggregate"}:
         raise ValueError("official_metadata_source must be either 'representative' or 'aggregate'")
+    if config["llm_routing"] not in {"all", "high-confidence-skip", "none"}:
+        raise ValueError("llm_routing must be one of 'all', 'high-confidence-skip', or 'none'")
+    if config["rule_direct_min_strength"] not in EVIDENCE_STRENGTH_ORDER:
+        raise ValueError("rule_direct_min_strength must be one of 'weak', 'medium', or 'strong'")
+    if config["max_api_workers"] < 1 or config["api_retries"] < 0 or config["api_retry_sleep"] < 0:
+        raise ValueError("max_api_workers must be >=1, api_retries >=0, and api_retry_sleep >=0")
+    if config["num_shards"] < 1 or not 0 <= config["shard_index"] < config["num_shards"]:
+        raise ValueError("num_shards must be >=1 and shard_index must be zero-based within the shard count")
+    if config["rule_direct_max_conflicts"] < 0:
+        raise ValueError("rule_direct_max_conflicts must be >=0")
+    if config["max_completion_tokens"] < 1:
+        raise ValueError("max_completion_tokens must be >=1")
+    if config["estimated_llm_latency"] < 0:
+        raise ValueError("estimated_llm_latency must be >=0")
     if config.get("submission_template") and not config["submission_template"].is_file():
         raise FileNotFoundError(f"submission template does not exist: {config['submission_template']}")
     input_dir = config["input_dir"]
@@ -294,6 +399,8 @@ def step_paths(output: Path) -> dict[str, Path]:
         "candidate_score_report": output / "candidate_score_report.md",
         "conflict_cases": output / "conflict_cases.jsonl",
         "critic_prompts": output / "critic_review_prompts",
+        "routing_summary": output / "routing_summary.csv",
+        "inference_plan_report": output / "inference_plan_report.md",
         "official_submission_csv": output / "official_submission.csv",
         "official_submission_xlsx": output / "official_submission.xlsx",
     }
@@ -404,6 +511,51 @@ def prepare_evidence(config: dict[str, Any], paths: dict[str, Path], pcaps: list
         "selected_records": len(selected),
     }
     return selected, case_to_pcap, record_to_pcap, evidence_stats
+
+
+def record_identity(record: dict[str, Any]) -> str:
+    return str(record.get("record_id") or record.get("session_id") or "")
+
+
+def apply_shard_to_records(
+    records: list[dict[str, Any]],
+    *,
+    num_shards: int = 1,
+    shard_index: int = 0,
+) -> list[dict[str, Any]]:
+    if num_shards <= 1:
+        return list(records)
+    return [record for index, record in enumerate(records) if index % num_shards == shard_index]
+
+
+def apply_configured_shard(
+    config: dict[str, Any],
+    paths: dict[str, Path],
+    records: list[dict[str, Any]],
+    record_to_pcap: dict[str, str],
+) -> tuple[list[dict[str, Any]], dict[str, str], dict[str, int]]:
+    num_shards = int(config.get("num_shards") or 1)
+    shard_index = int(config.get("shard_index") or 0)
+    if num_shards <= 1:
+        return records, record_to_pcap, {
+            "pre_shard_records": len(records),
+            "num_shards": 1,
+            "shard_index": 0,
+            "shard_records": len(records),
+        }
+    full_selected = paths["selected"].with_name("selected_records_all.json")
+    write_json(full_selected, records)
+    shard_records = apply_shard_to_records(records, num_shards=num_shards, shard_index=shard_index)
+    write_json(paths["selected"], shard_records)
+    shard_ids = {record_identity(record) for record in shard_records}
+    shard_record_to_pcap = {record_id: pcap for record_id, pcap in record_to_pcap.items() if record_id in shard_ids}
+    return shard_records, shard_record_to_pcap, {
+        "pre_shard_records": len(records),
+        "num_shards": num_shards,
+        "shard_index": shard_index,
+        "shard_records": len(shard_records),
+        "selected_records_all": str(full_selected),
+    }
 
 
 def prepare_rag(config: dict[str, Any], paths: dict[str, Path], expected_count: int) -> list[dict[str, Any]]:
@@ -554,20 +706,266 @@ def validate_prediction(item: dict[str, Any], record: dict[str, Any]) -> dict[st
     }
 
 
+def number_value(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def normalized_technique(value: Any) -> str:
+    technique = str(value or "").strip().upper()
+    return technique if technique in TECHNIQUE_CODES else ""
+
+
+def primary_rule_candidate(record: dict[str, Any]) -> str:
+    return normalized_technique(record.get("primary_rule_candidate"))
+
+
+def technique_score(record: dict[str, Any], technique: str) -> float:
+    scores = record.get("candidate_technique_scores") or {}
+    if isinstance(scores, dict) and technique in scores:
+        return number_value(scores.get(technique))
+    candidates = record.get("top_rule_candidates") or []
+    if isinstance(candidates, list):
+        for item in candidates:
+            if not isinstance(item, dict):
+                continue
+            code = normalized_technique(item.get("technique") or item.get("code") or item.get("technique_code"))
+            if code == technique:
+                return number_value(item.get("score") or item.get("value"))
+    return 0.0
+
+
+def best_score_candidate(record: dict[str, Any]) -> str:
+    primary = primary_rule_candidate(record)
+    if primary:
+        return primary
+    scores = record.get("candidate_technique_scores") or {}
+    if isinstance(scores, dict):
+        valid = [(normalized_technique(code), number_value(score)) for code, score in scores.items()]
+        valid = [(code, score) for code, score in valid if code]
+        if valid:
+            return max(valid, key=lambda item: (item[1], item[0] != "TN01_01"))[0]
+    return "TN01_01"
+
+
+def score_margin(record: dict[str, Any], technique: str) -> float:
+    if record.get("score_margin") not in (None, ""):
+        return number_value(record.get("score_margin"))
+    scores = record.get("candidate_technique_scores") or {}
+    if not isinstance(scores, dict):
+        return 0.0
+    values = sorted((number_value(score) for code, score in scores.items() if normalized_technique(code)), reverse=True)
+    if not values:
+        return 0.0
+    if len(values) == 1:
+        return values[0]
+    return max(0.0, technique_score(record, technique) - values[1])
+
+
+def evidence_strength_rank(value: Any) -> int:
+    return EVIDENCE_STRENGTH_ORDER.get(str(value or "").strip().lower(), 0)
+
+
+def list_values(value: Any) -> list[str]:
+    if value in (None, "", [], {}):
+        return []
+    if isinstance(value, dict):
+        return [str(key) for key, enabled in value.items() if enabled]
+    if isinstance(value, list):
+        return [str(item) for item in value if item not in (None, "")]
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, (list, dict)):
+            return list_values(parsed)
+        return [part.strip() for part in re.split(r"[,;]", text) if part.strip()]
+    return [str(value)]
+
+
+def routing_conflict_flags(record: dict[str, Any]) -> list[str]:
+    flags: list[str] = []
+    for key in ("rule_conflict_flags", "conflict_flags"):
+        flags.extend(list_values(record.get(key)))
+    if as_bool(record.get("conflict_review_needed")):
+        flags.append("conflict_review_needed")
+    return sorted(set(flags))
+
+
+def rule_direct_decision(record: dict[str, Any], config: dict[str, Any]) -> tuple[bool, str, dict[str, Any]]:
+    technique = primary_rule_candidate(record)
+    if not technique:
+        return False, "missing_primary_rule_candidate", {}
+    score = technique_score(record, technique)
+    margin = score_margin(record, technique)
+    strength = str(record.get("evidence_strength") or "").strip().lower()
+    flags = routing_conflict_flags(record)
+    detail = {
+        "technique": technique,
+        "stage": stage_from_technique(technique),
+        "score": score,
+        "margin": margin,
+        "evidence_strength": strength,
+        "conflict_flags": flags,
+    }
+    if technique == "TN01_01" and not config.get("rule_direct_allow_normal", False):
+        return False, "normal_rule_direct_disabled", detail
+    if score < float(config.get("rule_direct_min_score", 7.0)):
+        return False, "score_below_threshold", detail
+    if margin < float(config.get("rule_direct_min_margin", 2.5)):
+        return False, "margin_below_threshold", detail
+    if evidence_strength_rank(strength) < evidence_strength_rank(config.get("rule_direct_min_strength", "strong")):
+        return False, "evidence_strength_below_threshold", detail
+    if len(flags) > int(config.get("rule_direct_max_conflicts", 0)):
+        return False, "too_many_conflicts", detail
+    if any(flag in BLOCK_RULE_DIRECT_FLAGS for flag in flags):
+        return False, "blocking_conflict_flag", detail
+    return True, "high_confidence_rule_candidate", detail
+
+
+def rule_direct_allowed(record: dict[str, Any], config: dict[str, Any]) -> bool:
+    allowed, _, _ = rule_direct_decision(record, config)
+    return allowed
+
+
+def rule_evidence_text(record: dict[str, Any], technique: str) -> list[str]:
+    evidence: list[str] = []
+    for key in ("rule_evidence", "rule_reasons"):
+        evidence.extend(list_values(record.get(key)))
+    candidate_evidence = record.get("candidate_evidence") or {}
+    if isinstance(candidate_evidence, dict):
+        evidence.extend(list_values(candidate_evidence.get(technique)))
+    return list(dict.fromkeys(" ".join(str(item).split()) for item in evidence if str(item).strip()))
+
+
+def compact_text(text: str, max_chars: int = 220) -> str:
+    clean = " ".join(str(text or "").split())
+    if len(clean) <= max_chars:
+        return clean
+    return clean[: max_chars - 1].rstrip(" ,.;") + "."
+
+
+def build_rule_direct_prediction(record: dict[str, Any], config: dict[str, Any], *, forced: bool = False) -> dict[str, Any]:
+    technique = best_score_candidate(record)
+    score = technique_score(record, technique)
+    margin = score_margin(record, technique)
+    strength = str(record.get("evidence_strength") or "").strip().lower()
+    stage = stage_from_technique(technique) or "TN01"
+    flags = routing_conflict_flags(record)
+    evidence = rule_evidence_text(record, technique)
+    if evidence:
+        reason = "; ".join(evidence[:2])
+    else:
+        reason = f"Deterministic evidence priors select {technique}."
+    reason = compact_text(reason, 180 if config.get("compact_reason") else 300)
+    confidence = 0.72 if forced else 0.78
+    confidence += min(max(score - 7.0, 0.0) * 0.015, 0.07)
+    confidence += min(max(margin - 2.5, 0.0) * 0.015, 0.05)
+    if strength == "strong":
+        confidence += 0.04
+    elif strength == "weak":
+        confidence -= 0.08
+    if technique == "TN01_01":
+        confidence -= 0.06
+    confidence = max(0.55, min(confidence, 0.9))
+    return {
+        "record_id": record_identity(record),
+        "pcap_id": record.get("pcap_id"),
+        "record_type": record.get("record_type"),
+        "start_time": record.get("start_time"),
+        "end_time": record.get("end_time"),
+        "src_ip": record.get("src_ip"),
+        "src_port": record.get("src_port"),
+        "dst_ip": record.get("dst_ip"),
+        "dst_port": record.get("dst_port"),
+        "stage_code": stage,
+        "technique_guess": technique,
+        "technique_stage_consistent": technique in TECHNIQUE_TO_STAGE and TECHNIQUE_TO_STAGE[technique] == stage,
+        "confidence": round(confidence, 4),
+        "reason": reason,
+        "response_meta": {
+            "inference_source": "rule_direct",
+            "routing_mode": config.get("llm_routing", "all"),
+            "forced": bool(forced),
+            "primary_rule_candidate": primary_rule_candidate(record),
+            "primary_rule_score": score,
+            "score_margin": margin,
+            "evidence_strength": strength,
+            "conflict_flags": flags,
+        },
+    }
+
+
+def apply_compact_reason(result: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    if config.get("compact_reason"):
+        result = dict(result)
+        result["reason"] = compact_text(str(result.get("reason") or ""), 220)
+    return result
+
+
+def load_existing_predictions(path: Path, records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    records_by_id = {record_identity(record): record for record in records}
+    existing: dict[str, dict[str, Any]] = {}
+    for item in read_jsonl(path):
+        record_id = str(item.get("record_id") or "")
+        if record_id not in records_by_id:
+            continue
+        try:
+            validated = validate_prediction(item, records_by_id[record_id])
+        except (ValueError, TypeError):
+            continue
+        if item.get("response_meta"):
+            validated["response_meta"] = item.get("response_meta")
+        existing[record_id] = validated
+    return existing
+
+
+def usage_dict(response: Any) -> dict[str, Any]:
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return {}
+    if hasattr(usage, "model_dump"):
+        data = usage.model_dump()
+        return data if isinstance(data, dict) else {}
+    if isinstance(usage, dict):
+        return usage
+    return {key: getattr(usage, key) for key in ("prompt_tokens", "completion_tokens", "total_tokens") if hasattr(usage, key)}
+
+
 def run_api(config: dict[str, Any], paths: dict[str, Path], records: list[dict[str, Any]], manifest: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
-    if config["dry_run"]:
+    if config["dry_run"] or not records or not manifest:
         return [], [], 0
     try:
         from openai import OpenAI
     except ImportError as exc:
         raise RuntimeError("live mode requires the openai package from requirements.txt") from exc
-    client = OpenAI(base_url=config["base_url"], api_key=config["api_key"] or "EMPTY", timeout=config["request_timeout"])
     paths["api_parsed"].mkdir(parents=True, exist_ok=True)
     records_by_id = {str(record.get("record_id") or record.get("session_id")): record for record in records}
+    manifest = [entry for entry in manifest if str(entry.get("record_id")) in records_by_id]
     results: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
     api_calls = 0
-    for index, entry in enumerate(manifest, start=1):
+    api_call_lock = threading.Lock()
+    thread_local = threading.local()
+    retries = int(config.get("api_retries", config.get("max_retries", 2)))
+    retry_sleep = float(config.get("api_retry_sleep", 3.0))
+    max_tokens = int(config.get("max_completion_tokens", 384))
+
+    def client_for_thread() -> Any:
+        client = getattr(thread_local, "client", None)
+        if client is None:
+            client = OpenAI(base_url=config["base_url"], api_key=config["api_key"] or "EMPTY", timeout=config["request_timeout"])
+            thread_local.client = client
+        return client
+
+    def infer_one(index: int, entry: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None, int]:
+        nonlocal api_calls
         record_id = entry["record_id"]
         parsed_path = paths["api_parsed"] / f"{hashlib.sha256(record_id.encode()).hexdigest()}.json"
         prompt = (paths["prompts"] / entry["prompt_file"]).read_text(encoding="utf-8")
@@ -578,42 +976,252 @@ def run_api(config: dict[str, Any], paths: dict[str, Path], records: list[dict[s
                 if (raw_cached.get("response_meta") or {}).get("prompt_sha256") != prompt_sha256:
                     raise ValueError("cached response prompt hash mismatch")
                 cached = validate_prediction(raw_cached, records_by_id[record_id])
-                results.append(cached)
+                cached["response_meta"] = raw_cached.get("response_meta") or {}
+                cached["response_meta"].setdefault("inference_source", "llm")
                 print(f"[SKIP] API {index}/{len(manifest)}: cached {record_id}", flush=True)
-                continue
+                return apply_compact_reason(cached, config), None, 0
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
                 pass
         error = ""
-        for attempt in range(config["max_retries"] + 1):
+        attempts = retries + 1
+        for attempt in range(attempts):
             started = time.monotonic()
             try:
-                api_calls += 1
-                response = client.chat.completions.create(
+                with api_call_lock:
+                    api_calls += 1
+                response = client_for_thread().chat.completions.create(
                     model=config["model"], messages=[{"role": "user", "content": prompt}],
-                    temperature=0, top_p=0.8, max_tokens=384, stream=False,
+                    temperature=0, top_p=0.8, max_tokens=max_tokens, stream=False,
                     extra_body=qwen_extra_body(config["enable_thinking"]),
                 )
                 content = response.choices[0].message.content or ""
                 parsed = validate_prediction(extract_json_object(content), records_by_id[record_id])
+                usage = usage_dict(response)
                 parsed["response_meta"] = {
                     "request_id": getattr(response, "id", None), "latency_seconds": round(time.monotonic() - started, 3),
                     "prompt_sha256": prompt_sha256,
-                    "usage": getattr(getattr(response, "usage", None), "model_dump", lambda: None)(),
+                    "prompt_tokens": usage.get("prompt_tokens"),
+                    "completion_tokens": usage.get("completion_tokens"),
+                    "total_tokens": usage.get("total_tokens"),
+                    "usage": usage,
+                    "inference_source": "llm",
                 }
                 write_json(parsed_path, parsed)
-                results.append(parsed)
                 print(f"[OK] API {index}/{len(manifest)}: {record_id}", flush=True)
-                break
+                return apply_compact_reason(parsed, config), None, 1
             except Exception as exc:  # Network/client exceptions vary by OpenAI SDK version.
                 error = safe_exception(exc)
-                if attempt < config["max_retries"]:
-                    time.sleep(min(2 ** attempt, 8))
-        else:
-            failures.append({"record_id": record_id, "pcap_id": records_by_id[record_id].get("pcap_id"), "error": error[:1000], "attempts": config["max_retries"] + 1})
-            print(f"[FAIL] API {index}/{len(manifest)}: {record_id}: {error}", flush=True)
+                if attempt < retries:
+                    time.sleep(retry_sleep)
+        failure = {"record_id": record_id, "pcap_id": records_by_id[record_id].get("pcap_id"), "error": error[:1000], "attempts": attempts}
+        print(f"[FAIL] API {index}/{len(manifest)}: {record_id}: {error}", flush=True)
+        return None, failure, 0
+
+    indexed_manifest = list(enumerate(manifest, start=1))
+    workers = int(config.get("max_api_workers") or 1)
+    if workers <= 1:
+        for index, entry in indexed_manifest:
+            result, failure, _ = infer_one(index, entry)
+            if result is not None:
+                results.append(result)
+            if failure is not None:
+                failures.append(failure)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(infer_one, index, entry): entry for index, entry in indexed_manifest}
+            for future in as_completed(futures):
+                result, failure, _ = future.result()
+                if result is not None:
+                    results.append(result)
+                if failure is not None:
+                    failures.append(failure)
     order = {entry["record_id"]: index for index, entry in enumerate(manifest)}
     results.sort(key=lambda item: order[item["record_id"]])
+    failures.sort(key=lambda item: order.get(item["record_id"], 10**9))
     return results, failures, api_calls
+
+
+def routing_row(record: dict[str, Any], route: str, status: str, result: dict[str, Any] | None = None, reason: str = "") -> dict[str, Any]:
+    technique = primary_rule_candidate(record)
+    flags = routing_conflict_flags(record)
+    meta = (result or {}).get("response_meta") or {}
+    return {
+        "record_id": record_identity(record),
+        "pcap_id": record.get("pcap_id") or "",
+        "record_type": record.get("record_type") or "",
+        "route": route,
+        "status": status,
+        "inference_source": meta.get("inference_source") or route,
+        "primary_rule_candidate": technique,
+        "primary_rule_score": technique_score(record, technique) if technique else "",
+        "score_margin": score_margin(record, technique) if technique else "",
+        "evidence_strength": record.get("evidence_strength") or "",
+        "conflict_count": len(flags),
+        "conflict_flags": json_cell(flags),
+        "reason": reason or (result or {}).get("reason") or "",
+        "latency_seconds": meta.get("latency_seconds", ""),
+    }
+
+
+def write_routing_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=ROUTING_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def write_inference_plan_report(config: dict[str, Any], paths: dict[str, Path], stats: dict[str, Any]) -> None:
+    lines = [
+        "# Inference Plan Report",
+        "",
+        f"- Total records in this run: {stats.get('total_records', 0)}",
+        f"- Rule-direct records: {stats.get('rule_direct_count', 0)}",
+        f"- LLM-routed records: {stats.get('llm_count', 0)}",
+        f"- Failed records: {stats.get('failed_count', 0)}",
+        f"- API workers: {config.get('max_api_workers', 1)}",
+        f"- LLM routing mode: `{config.get('llm_routing', 'all')}`",
+        f"- Estimated serial LLM days: {stats.get('estimated_llm_days_serial', 0)}",
+        f"- Average live LLM latency seconds: {stats.get('average_latency', 0)}",
+        f"- Actual throughput records/second: {stats.get('actual_throughput_records_per_second', 0)}",
+        f"- Inference elapsed seconds: {stats.get('inference_elapsed_seconds', 0)}",
+        "",
+        "## Resume",
+        "",
+        f"- resumed_from_existing_predictions: `{str(stats.get('resumed_from_existing_predictions', False)).lower()}`",
+        f"- skipped_completed: {stats.get('skipped_completed', 0)}",
+        f"- remaining_to_infer: {stats.get('remaining_to_infer', 0)}",
+        "",
+        "## Shard",
+        "",
+        f"- num_shards: {config.get('num_shards', 1)}",
+        f"- shard_index: {config.get('shard_index', 0)}",
+        f"- pre_shard_records: {stats.get('pre_shard_records', stats.get('total_records', 0))}",
+        f"- shard_records: {stats.get('shard_records', stats.get('total_records', 0))}",
+        "",
+        "## Routing Outputs",
+        "",
+        f"- routing_summary.csv: `{paths['routing_summary']}`",
+        f"- failed_records.jsonl: `{config['output_dir'] / 'failed_records.jsonl'}`",
+        "",
+    ]
+    paths["inference_plan_report"].write_text("\n".join(lines), encoding="utf-8")
+
+
+def average_llm_latency(results: list[dict[str, Any]]) -> float:
+    latencies = [
+        number_value((item.get("response_meta") or {}).get("latency_seconds"), -1.0)
+        for item in results
+        if (item.get("response_meta") or {}).get("inference_source") == "llm"
+    ]
+    latencies = [value for value in latencies if value >= 0]
+    return round(sum(latencies) / len(latencies), 3) if latencies else 0.0
+
+
+def run_inference(
+    config: dict[str, Any],
+    paths: dict[str, Path],
+    records: list[dict[str, Any]],
+    manifest: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int, dict[str, Any], list[dict[str, Any]]]:
+    if config["dry_run"]:
+        return [], [], 0, {
+            "total_records": len(records),
+            "rule_direct_count": 0,
+            "llm_count": 0,
+            "skipped_completed": 0,
+            "remaining_to_infer": 0,
+            "resumed_from_existing_predictions": False,
+            "inference_elapsed_seconds": 0.0,
+            "average_latency": 0.0,
+            "actual_throughput_records_per_second": 0.0,
+            "estimated_llm_days_serial": 0.0,
+        }, []
+    started = time.monotonic()
+    record_order = {record_identity(record): index for index, record in enumerate(records)}
+    record_by_id = {record_identity(record): record for record in records}
+    manifest_by_id = {str(entry.get("record_id")): entry for entry in manifest}
+    existing_by_id = load_existing_predictions(config["output_dir"] / "predictions.jsonl", records) if config.get("resume") else {}
+    results_by_id: dict[str, dict[str, Any]] = {}
+    routing_rows: list[dict[str, Any]] = []
+    llm_records: list[dict[str, Any]] = []
+    llm_manifest: list[dict[str, Any]] = []
+    llm_route_reasons: dict[str, str] = {}
+    pre_api_failures: list[dict[str, Any]] = []
+    skipped_completed = 0
+    rule_direct_count = 0
+    routing_mode = config.get("llm_routing", "all")
+    for record in records:
+        record_id = record_identity(record)
+        if record_id in existing_by_id:
+            result = apply_compact_reason(existing_by_id[record_id], config)
+            results_by_id[record_id] = result
+            skipped_completed += 1
+            routing_rows.append(routing_row(record, "resume", "skipped_completed", result))
+            continue
+        if routing_mode == "none":
+            result = build_rule_direct_prediction(record, config, forced=True)
+            results_by_id[record_id] = result
+            rule_direct_count += 1
+            routing_rows.append(routing_row(record, "rule_direct", "success", result, "llm_routing=none"))
+            continue
+        if routing_mode == "high-confidence-skip":
+            allowed, decision_reason, _ = rule_direct_decision(record, config)
+            if allowed:
+                result = build_rule_direct_prediction(record, config)
+                results_by_id[record_id] = result
+                rule_direct_count += 1
+                routing_rows.append(routing_row(record, "rule_direct", "success", result, decision_reason))
+                continue
+            llm_route_reasons[record_id] = decision_reason
+        entry = manifest_by_id.get(record_id)
+        if entry:
+            llm_records.append(record)
+            llm_manifest.append(entry)
+        else:
+            failure = {
+                "record_id": record_id,
+                "pcap_id": record.get("pcap_id"),
+                "error": "missing prompt manifest entry",
+                "attempts": 0,
+            }
+            pre_api_failures.append(failure)
+            routing_rows.append(routing_row(record, "llm", "failed", None, failure["error"]))
+    if llm_records:
+        llm_results, api_failures, api_calls = run_api(config, paths, llm_records, llm_manifest)
+    else:
+        llm_results, api_failures, api_calls = [], [], 0
+    failures = pre_api_failures + api_failures
+    for result in llm_results:
+        record_id = str(result.get("record_id") or "")
+        results_by_id[record_id] = result
+        record = record_by_id.get(record_id, {})
+        routing_rows.append(routing_row(record, "llm", "success", result, llm_route_reasons.get(record_id, "")))
+    for failure in api_failures:
+        record_id = str(failure.get("record_id") or "")
+        record = record_by_id.get(record_id, {})
+        routing_rows.append(routing_row(record, "llm", "failed", None, llm_route_reasons.get(record_id) or str(failure.get("error") or "")))
+    results = sorted(results_by_id.values(), key=lambda item: record_order.get(str(item.get("record_id")), 10**9))
+    elapsed = round(time.monotonic() - started, 3)
+    avg_latency = average_llm_latency(llm_results)
+    estimate_latency = avg_latency or float(config.get("estimated_llm_latency") or 0.0)
+    completed_or_failed = len(results) + len(failures)
+    routing_rows.sort(key=lambda item: (record_order.get(str(item.get("record_id")), 10**9), str(item.get("status"))))
+    stats = {
+        "total_records": len(records),
+        "rule_direct_count": rule_direct_count,
+        "llm_count": len(llm_records),
+        "llm_success_count": len(llm_results),
+        "skipped_completed": skipped_completed,
+        "remaining_to_infer": len(records) - skipped_completed,
+        "resumed_from_existing_predictions": bool(existing_by_id),
+        "failed_count": len(failures),
+        "inference_elapsed_seconds": elapsed,
+        "average_latency": avg_latency,
+        "actual_throughput_records_per_second": round(completed_or_failed / elapsed, 4) if elapsed > 0 else 0.0,
+        "estimated_llm_days_serial": round(len(llm_records) * estimate_latency / 86400, 4),
+    }
+    return results, failures, api_calls, stats, routing_rows
 
 
 def official_rows(results: list[dict[str, Any]], record_to_pcap: dict[str, str]) -> list[dict[str, Any]]:
@@ -783,6 +1391,20 @@ def safe_config_report(config: dict[str, Any]) -> dict[str, Any]:
         "dry_run": config["dry_run"], "resume": config["resume"],
         "limit": config["limit"], "rag_top_k": config["rag_top_k"], "max_prompt_tokens": config["max_prompt_tokens"],
         "request_timeout": config["request_timeout"], "max_retries": config["max_retries"],
+        "api_retries": config.get("api_retries", config.get("max_retries")),
+        "api_retry_sleep": config.get("api_retry_sleep", 3.0),
+        "max_api_workers": config.get("max_api_workers", 1),
+        "num_shards": config.get("num_shards", 1),
+        "shard_index": config.get("shard_index", 0),
+        "llm_routing": config.get("llm_routing", "all"),
+        "rule_direct_min_score": config.get("rule_direct_min_score", 7.0),
+        "rule_direct_min_margin": config.get("rule_direct_min_margin", 2.5),
+        "rule_direct_min_strength": config.get("rule_direct_min_strength", "strong"),
+        "rule_direct_allow_normal": config.get("rule_direct_allow_normal", False),
+        "rule_direct_max_conflicts": config.get("rule_direct_max_conflicts", 0),
+        "max_completion_tokens": config.get("max_completion_tokens", 384),
+        "compact_reason": config.get("compact_reason", False),
+        "estimated_llm_latency": config.get("estimated_llm_latency", 32.8),
         "enable_thinking": config["enable_thinking"], "thinking_control": "chat_template_kwargs.enable_thinking",
         "prefer_zeek": config["prefer_zeek"], "allow_tshark_fallback": config["allow_tshark_fallback"],
         "enable_tshark_observable_supplement": config["enable_tshark_observable_supplement"],
@@ -809,11 +1431,35 @@ def write_summary(config: dict[str, Any], paths: dict[str, Path], stats: dict[st
         f"- Official submission XLSX written: `{str(stats.get('official_xlsx_written', False)).lower()}`",
         f"- Candidate score rows: {stats.get('candidate_rows', 0)}", f"- Conflict cases: {stats.get('conflict_cases', 0)}",
         f"- Failed records: {stats.get('failures', 0)}", f"- API requests attempted: {stats.get('api_calls', 0)}",
+        f"- API workers: {config.get('max_api_workers', 1)}",
+        f"- LLM routing mode: `{config.get('llm_routing', 'all')}`",
+        f"- Rule-direct predictions: {stats.get('rule_direct_count', 0)}",
+        f"- LLM-routed records: {stats.get('llm_count', 0)}",
+        f"- Resumed from existing predictions: `{str(stats.get('resumed_from_existing_predictions', False)).lower()}`",
+        f"- Skipped completed predictions: {stats.get('skipped_completed', 0)}",
+        f"- Remaining to infer after resume: {stats.get('remaining_to_infer', 0)}",
+        f"- Shard: {stats.get('shard_index', config.get('shard_index', 0))}/{stats.get('num_shards', config.get('num_shards', 1))}",
         f"- Prompt profile: `{PROMPT_VERSION}`", f"- Maximum estimated prompt tokens: {stats.get('max_prompt_tokens', 0)} / {config['max_prompt_tokens']}",
         f"- Prompts with RAG context: {stats.get('prompts_with_rag', 0)}", "",
         "## Model request controls", "",
         f"- enable_thinking: `{str(config['enable_thinking']).lower()}`",
         "- thinking_control: `chat_template_kwargs.enable_thinking`", "",
+        "## Inference routing controls", "",
+        f"- max_api_workers: {config.get('max_api_workers', 1)}",
+        f"- api_retries: {config.get('api_retries', config.get('max_retries'))}",
+        f"- api_retry_sleep: {config.get('api_retry_sleep', 3.0)}",
+        f"- llm_routing: `{config.get('llm_routing', 'all')}`",
+        f"- rule_direct_min_score: {config.get('rule_direct_min_score', 7.0)}",
+        f"- rule_direct_min_margin: {config.get('rule_direct_min_margin', 2.5)}",
+        f"- rule_direct_min_strength: `{config.get('rule_direct_min_strength', 'strong')}`",
+        f"- rule_direct_allow_normal: `{str(config.get('rule_direct_allow_normal', False)).lower()}`",
+        f"- rule_direct_max_conflicts: {config.get('rule_direct_max_conflicts', 0)}",
+        f"- max_completion_tokens: {config.get('max_completion_tokens', 384)}",
+        f"- compact_reason: `{str(config.get('compact_reason', False)).lower()}`",
+        f"- num_shards: {config.get('num_shards', 1)}",
+        f"- shard_index: {config.get('shard_index', 0)}",
+        f"- inference_plan_report: `{paths['inference_plan_report']}`",
+        f"- routing_summary_csv: `{paths['routing_summary']}`", "",
         "## Critic controls", "",
         f"- enable_critic: `{str(config.get('enable_critic', False)).lower()}`",
         f"- critic_only_on_conflict: `{str(config.get('critic_only_on_conflict', True)).lower()}`", "",
@@ -838,6 +1484,7 @@ def write_summary(config: dict[str, Any], paths: dict[str, Path], stats: dict[st
         "## Primary outputs", "",
         "- `official_submission.csv`", "- `official_submission.xlsx`",
         "- `phase1_predictions.csv`", "- `predictions.jsonl`", "- `failed_records.jsonl`",
+        "- `routing_summary.csv`", "- `inference_plan_report.md`",
         "- `parse_errors.jsonl`", "- `candidate_scores.csv`", "- `candidate_score_report.md`",
         "- `conflict_cases.jsonl`", "- `prompt_samples/`", "- `prompts/prompt_manifest.json`", "",
     ]
@@ -860,13 +1507,18 @@ def main() -> int:
         "pcaps": len(pcaps), "records": 0, "source_session_cards": 0,
         "source_classification_records": 0, "pcap_level_records": 0,
         "prompts": 0, "predictions": 0, "failures": 0, "api_calls": 0,
+        "rule_direct_count": 0, "llm_count": 0, "skipped_completed": 0, "remaining_to_infer": 0,
+        "resumed_from_existing_predictions": False,
+        "pre_shard_records": 0, "num_shards": config.get("num_shards", 1), "shard_index": config.get("shard_index", 0), "shard_records": 0,
         "candidate_rows": 0, "conflict_cases": 0,
         "official_submission_rows": 0, "official_xlsx_written": False,
     }
     try:
         records, _, record_to_pcap, evidence_stats = prepare_evidence(config, paths, pcaps)
-        stats["records"] = len(records)
         stats.update(evidence_stats)
+        records, record_to_pcap, shard_stats = apply_configured_shard(config, paths, records, record_to_pcap)
+        stats.update(shard_stats)
+        stats["records"] = len(records)
         state["steps"]["evidence"] = "complete"
         write_json(output / "run_state.json", state)
         retrieval = prepare_rag(config, paths, len(records))
@@ -877,10 +1529,13 @@ def main() -> int:
         stats["prompts_with_rag"] = sum(item["rag_chunks_included"] > 0 for item in manifest)
         state["steps"]["prompts"] = "complete"
         write_json(output / "run_state.json", state)
-        results, failures, api_calls = run_api(config, paths, records, manifest)
+        results, failures, api_calls, inference_stats, routing_rows = run_inference(config, paths, records, manifest)
+        stats.update(inference_stats)
         stats.update({"predictions": len(results), "failures": len(failures), "api_calls": api_calls})
         write_jsonl(output / "predictions.jsonl", results)
         write_jsonl(output / "failed_records.jsonl", failures)
+        write_routing_csv(paths["routing_summary"], routing_rows)
+        write_inference_plan_report(config, paths, stats)
         write_csv(output / "phase1_predictions.csv", official_rows(results, record_to_pcap))
         export_stats = export_official_submission(
             predictions=results,
