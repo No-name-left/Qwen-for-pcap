@@ -5,7 +5,7 @@ model: qwen3.5
 api_key: EMPTY
 answer: null
 phase: phase1
-prompt_profile: observable_timing_boundary_rag_v5
+prompt_profile: observable_timing_boundary_rag_v4
 granularity: pcap
 dry_run: false
 resume: true
@@ -21,4 +21,3 @@ allow_tshark_fallback: true
 enable_tshark_observable_supplement: true
 zeek_docker_image: public.ecr.aws/zeek/zeek:8.0.6-arm64
 prompt_sample_limit: 5
-enable_safe_calibration: true

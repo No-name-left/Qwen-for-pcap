@@ -38,9 +38,7 @@ CSV_FIELDS = [
 CANDIDATE_SCORE_FIELDS = [
     "pcap_name", "pcap_id", "record_id", "record_type",
     "primary_rule_candidate", "top_rule_candidates", "score_margin", "evidence_strength",
-    "benign_profile_score", "attack_indicator_score", "payload_observability_gap", "weak_attack_uncertainty",
     "predicted_technique", "predicted_stage", "confidence",
-    "calibration_applied", "pre_calibration_technique", "post_calibration_technique", "calibration_reason",
     "conflict_review_needed", "conflict_flags", "rule_evidence", "counter_evidence",
 ]
 PCAP_SUFFIXES = {".pcap", ".pcapng", ".cap"}
@@ -153,7 +151,6 @@ def effective_config(args: argparse.Namespace) -> dict[str, Any]:
         "prompt_sample_limit": config_value(data, args, "prompt_sample_limit", ["PHASE1_PROMPT_SAMPLE_LIMIT"], int),
         "enable_critic": config_value(data, args, "enable_critic", ["PHASE1_ENABLE_CRITIC"], as_bool),
         "critic_only_on_conflict": config_value(data, args, "critic_only_on_conflict", ["PHASE1_CRITIC_ONLY_ON_CONFLICT"], as_bool),
-        "enable_safe_calibration": config_value(data, args, "enable_safe_calibration", ["PHASE1_ENABLE_SAFE_CALIBRATION"], as_bool),
     }
     if values["enable_thinking"] is None:
         values["enable_thinking"] = False
@@ -170,8 +167,6 @@ def effective_config(args: argparse.Namespace) -> dict[str, Any]:
         values["enable_critic"] = False
     if values["critic_only_on_conflict"] is None:
         values["critic_only_on_conflict"] = True
-    if values["enable_safe_calibration"] is None:
-        values["enable_safe_calibration"] = True
     values["input_dir"] = Path(values["input_dir"]).expanduser().resolve()
     values["output_dir"] = Path(values["output_dir"]).expanduser().resolve()
     values["answer"] = Path(values["answer"]).expanduser().resolve() if values.get("answer") else None
@@ -208,8 +203,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--enable-critic", dest="enable_critic", action="store_true", default=None, help="Generate lightweight conflict-review prompts for PCAP-level predictions.")
     parser.add_argument("--disable-critic", dest="enable_critic", action="store_false", default=None, help="Disable conflict-review prompt generation.")
     parser.add_argument("--critic-only-on-conflict", action=argparse.BooleanOptionalAction, default=None, help="Only generate critic review prompts for conflict cases.")
-    parser.add_argument("--enable-safe-calibration", dest="enable_safe_calibration", action="store_true", default=None, help="Apply conservative deterministic calibration after model inference when rule evidence is strong.")
-    parser.add_argument("--disable-safe-calibration", dest="enable_safe_calibration", action="store_false", default=None, help="Disable post-model safe calibration.")
     parser.add_argument("--allow-remote-base-url", action="store_true", help="Explicitly allow a non-loopback OpenAI-compatible endpoint.")
     return parser.parse_args()
 
@@ -587,116 +580,6 @@ def run_api(config: dict[str, Any], paths: dict[str, Path], records: list[dict[s
     return results, failures, api_calls
 
 
-def reason_mentions_counter_evidence(reason: str, record: dict[str, Any]) -> bool:
-    counters = record.get("candidate_counter_evidence") or {}
-    if not counters:
-        return False
-    reason_text = str(reason or "").lower()
-    counter_blob = json.dumps(counters, ensure_ascii=False).lower()
-    tokens = [
-        token
-        for token in re.findall(r"[a-z0-9_./-]{5,}", counter_blob)
-        if token not in {"candidate", "evidence", "without", "traffic"}
-    ]
-    return any(token in reason_text for token in tokens[:80])
-
-
-def safe_calibration_skip_reason(record: dict[str, Any], result: dict[str, Any]) -> str:
-    primary = str(record.get("primary_rule_candidate") or "").upper()
-    predicted = prediction_technique(result)
-    if not primary or primary not in TECHNIQUE_CODES:
-        return "no_valid_primary_rule_candidate"
-    if predicted == primary:
-        return "model_already_matches_primary"
-    if str(record.get("evidence_strength") or "") != "strong":
-        return "primary_rule_candidate_not_strong"
-    if float(record.get("score_margin") or 0) < 3.0:
-        return "score_margin_below_safe_threshold"
-    flags = set(record.get("rule_conflict_flags") or [])
-    if record.get("weak_attack_uncertainty") or flags & {"weak_evidence", "weak_dynamic_post_no_payload_visibility", "low_score_margin"}:
-        return "weak_or_uncertain_evidence_not_overwritten"
-    if record.get("benign_profile_score") and record.get("attack_indicator_score") and "benign_profile_with_attack_indicators" in flags:
-        return "benign_profile_with_attack_indicators_requires_review"
-    if (record.get("candidate_counter_evidence") or {}).get(primary):
-        return "primary_candidate_has_counter_evidence"
-    confidence = float(result.get("confidence") or 0)
-    if confidence > 0.85 and reason_mentions_counter_evidence(str(result.get("reason") or ""), record):
-        return "high_confidence_model_reason_addresses_counter_evidence"
-    return ""
-
-
-def apply_safe_calibration(
-    config: dict[str, Any],
-    records: list[dict[str, Any]],
-    results: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    records_by_id = {str(record.get("record_id") or record.get("session_id")): record for record in records}
-    enabled = bool(config.get("enable_safe_calibration"))
-    adjusted: list[dict[str, Any]] = []
-    applied = 0
-    skipped = 0
-    considered = 0
-    for result in results:
-        item = dict(result)
-        record = records_by_id.get(str(item.get("record_id") or ""))
-        pre_technique = prediction_technique(item)
-        pre_stage = str(item.get("stage_code") or stage_from_technique(pre_technique)).upper()
-        item.setdefault("calibration_applied", False)
-        item.setdefault("pre_calibration_technique", pre_technique)
-        item.setdefault("post_calibration_technique", pre_technique)
-        item.setdefault("pre_calibration_prediction", {
-            "stage_code": pre_stage,
-            "technique_guess": pre_technique or None,
-            "confidence": item.get("confidence"),
-        })
-        item.setdefault("post_calibration_prediction", {
-            "stage_code": pre_stage,
-            "technique_guess": pre_technique or None,
-            "confidence": item.get("confidence"),
-        })
-        if not enabled or not record:
-            item["calibration_reason"] = "safe_calibration_disabled" if not enabled else "record_not_available_for_calibration"
-            adjusted.append(item)
-            continue
-        primary = str(record.get("primary_rule_candidate") or "").upper()
-        if primary and primary != pre_technique:
-            considered += 1
-            reason = safe_calibration_skip_reason(record, item)
-            if not reason:
-                evidence = "; ".join(str(value) for value in (record.get("rule_evidence") or [])[:2])
-                calibration_reason = (
-                    f"safe calibration selected {primary}: strong primary rule evidence, "
-                    f"margin={record.get('score_margin')}, evidence={evidence or 'rule evidence present'}"
-                )
-                item["technique_guess"] = primary
-                item["stage_code"] = stage_from_technique(primary)
-                item["technique_stage_consistent"] = True
-                item["confidence"] = round(min(0.85, max(float(item.get("confidence") or 0), 0.7)), 4)
-                item["post_calibration_technique"] = primary
-                item["post_calibration_prediction"] = {
-                    "stage_code": item["stage_code"],
-                    "technique_guess": primary,
-                    "confidence": item["confidence"],
-                }
-                item["calibration_applied"] = True
-                item["calibration_reason"] = calibration_reason[:500]
-                old_reason = str(item.get("reason") or "")
-                item["reason"] = (old_reason + " " + calibration_reason).strip()[:500]
-                applied += 1
-            else:
-                item["calibration_considered_but_skipped"] = True
-                item["calibration_reason"] = reason
-                skipped += 1
-        else:
-            item["calibration_reason"] = "model_already_matches_primary" if primary else "no_primary_rule_candidate"
-        adjusted.append(item)
-    return adjusted, {
-        "safe_calibration_considered": considered,
-        "safe_calibrations_applied": applied,
-        "safe_calibrations_skipped": skipped,
-    }
-
-
 def official_rows(results: list[dict[str, Any]], record_to_pcap: dict[str, str]) -> list[dict[str, Any]]:
     rows = []
     for item in results:
@@ -742,26 +625,17 @@ def prediction_technique(result: dict[str, Any] | None) -> str:
     return str(result.get("technique_guess") or "").upper()
 
 
-def pre_calibration_technique(result: dict[str, Any] | None) -> str:
-    if not result:
-        return ""
-    return str(result.get("pre_calibration_technique") or result.get("technique_guess") or "").upper()
-
-
 def candidate_conflict_flags(record: dict[str, Any], result: dict[str, Any] | None) -> list[str]:
     flags = list(record.get("rule_conflict_flags") or [])
     predicted = prediction_technique(result)
-    model_predicted = pre_calibration_technique(result)
     predicted_stage = str((result or {}).get("stage_code") or stage_from_technique(predicted)).upper()
     primary = str(record.get("primary_rule_candidate") or "")
     scores = record.get("candidate_technique_scores") or {}
     attack_scores = [float(score or 0) for code, score in scores.items() if code != "TN01_01"]
     max_attack = max(attack_scores or [0.0])
     if result:
-        if model_predicted and primary and model_predicted != primary:
+        if predicted and primary and predicted != primary:
             flags.append("model_prediction_differs_from_primary_rule_candidate")
-        if result.get("calibration_applied"):
-            flags.append("safe_calibration_applied")
         if predicted == "TN01_01" or predicted_stage == "TN01":
             if max_attack >= 3.0 and str(record.get("evidence_strength")) != "weak":
                 flags.append("predicted_normal_with_attack_candidate")
@@ -820,17 +694,9 @@ def write_candidate_diagnostics(
             "top_rule_candidates": json_cell(record.get("top_rule_candidates")),
             "score_margin": record.get("score_margin"),
             "evidence_strength": record.get("evidence_strength") or "",
-            "benign_profile_score": record.get("benign_profile_score"),
-            "attack_indicator_score": record.get("attack_indicator_score"),
-            "payload_observability_gap": str(bool(record.get("payload_observability_gap"))).lower(),
-            "weak_attack_uncertainty": str(bool(record.get("weak_attack_uncertainty"))).lower(),
             "predicted_technique": predicted,
             "predicted_stage": predicted_stage,
             "confidence": (result or {}).get("confidence"),
-            "calibration_applied": str(bool((result or {}).get("calibration_applied"))).lower(),
-            "pre_calibration_technique": (result or {}).get("pre_calibration_technique") or predicted,
-            "post_calibration_technique": (result or {}).get("post_calibration_technique") or predicted,
-            "calibration_reason": (result or {}).get("calibration_reason") or "",
             "conflict_review_needed": str(review_needed).lower(),
             "conflict_flags": json_cell(flags),
             "rule_evidence": json_cell(record.get("rule_evidence") or record.get("candidate_evidence")),
@@ -845,29 +711,11 @@ def write_candidate_diagnostics(
                 prompt_path.write_text(build_critic_prompt(record, result, flags), encoding="utf-8")
     write_candidate_csv(paths["candidate_scores"], rows)
     write_jsonl(paths["conflict_cases"], conflict_rows)
-    benign_cases = sum(1 for record in records if float(record.get("benign_profile_score") or 0) > 0)
-    gap_cases = sum(1 for record in records if bool(record.get("payload_observability_gap")))
-    weak_dynamic_cases = sum(1 for record in records if "weak_dynamic_post_no_payload_visibility" in set(record.get("rule_conflict_flags") or []))
-    model_rule_conflicts = sum(
-        1 for record in records
-        if (result := result_by_id.get(str(record.get("record_id") or record.get("session_id") or "")))
-        and pre_calibration_technique(result)
-        and str(record.get("primary_rule_candidate") or "").upper()
-        and pre_calibration_technique(result) != str(record.get("primary_rule_candidate") or "").upper()
-    )
-    calibrations_applied = sum(1 for result in results if result.get("calibration_applied"))
-    calibrations_skipped = sum(1 for result in results if result.get("calibration_considered_but_skipped"))
     lines = [
         "# Candidate Score Report", "",
         f"- Records: {len(records)}",
         f"- Candidate rows: {len(rows)}",
         f"- Conflict review needed: {len(conflict_rows)}",
-        f"- Benign-profile cases: {benign_cases}",
-        f"- Payload-observability-gap cases: {gap_cases}",
-        f"- Weak dynamic POST/no-body cases: {weak_dynamic_cases}",
-        f"- Model-vs-rule conflicts: {model_rule_conflicts}",
-        f"- Safe calibrations applied: {calibrations_applied}",
-        f"- Safe calibrations skipped: {calibrations_skipped}",
         f"- Critic prompt generation enabled: `{str(config.get('enable_critic')).lower()}`",
         "",
         "## Notes", "",
@@ -877,16 +725,7 @@ def write_candidate_diagnostics(
         "",
     ]
     paths["candidate_score_report"].write_text("\n".join(lines), encoding="utf-8")
-    return {
-        "candidate_rows": len(rows),
-        "conflict_cases": len(conflict_rows),
-        "benign_profile_cases": benign_cases,
-        "payload_observability_gap_cases": gap_cases,
-        "weak_dynamic_post_cases": weak_dynamic_cases,
-        "model_rule_conflicts": model_rule_conflicts,
-        "diagnostic_calibrations_applied": calibrations_applied,
-        "diagnostic_calibrations_skipped": calibrations_skipped,
-    }
+    return {"candidate_rows": len(rows), "conflict_cases": len(conflict_rows)}
 
 
 def safe_config_report(config: dict[str, Any]) -> dict[str, Any]:
@@ -908,7 +747,6 @@ def safe_config_report(config: dict[str, Any]) -> dict[str, Any]:
         "zeek_docker_image": config.get("zeek_docker_image"),
         "save_prompt_samples": config["save_prompt_samples"], "prompt_sample_limit": config["prompt_sample_limit"],
         "enable_critic": config.get("enable_critic", False), "critic_only_on_conflict": config.get("critic_only_on_conflict", True),
-        "enable_safe_calibration": config.get("enable_safe_calibration", True),
         "prompt_version": PROMPT_VERSION,
     }
 
@@ -926,9 +764,6 @@ def write_summary(config: dict[str, Any], paths: dict[str, Path], stats: dict[st
         f"- Classification records selected for prompting: {stats.get('records', 0)}",
         f"- Prompts built: {stats.get('prompts', 0)}", f"- Predictions: {stats.get('predictions', 0)}",
         f"- Candidate score rows: {stats.get('candidate_rows', 0)}", f"- Conflict cases: {stats.get('conflict_cases', 0)}",
-        f"- Safe calibrations considered: {stats.get('safe_calibration_considered', 0)}",
-        f"- Safe calibrations applied: {stats.get('safe_calibrations_applied', 0)}",
-        f"- Safe calibrations skipped: {stats.get('safe_calibrations_skipped', 0)}",
         f"- Failed records: {stats.get('failures', 0)}", f"- API requests attempted: {stats.get('api_calls', 0)}",
         f"- Prompt profile: `{PROMPT_VERSION}`", f"- Maximum estimated prompt tokens: {stats.get('max_prompt_tokens', 0)} / {config['max_prompt_tokens']}",
         f"- Prompts with RAG context: {stats.get('prompts_with_rag', 0)}", "",
@@ -938,9 +773,6 @@ def write_summary(config: dict[str, Any], paths: dict[str, Path], stats: dict[st
         "## Critic controls", "",
         f"- enable_critic: `{str(config.get('enable_critic', False)).lower()}`",
         f"- critic_only_on_conflict: `{str(config.get('critic_only_on_conflict', True)).lower()}`", "",
-        "## Safe calibration controls", "",
-        f"- enable_safe_calibration: `{str(config.get('enable_safe_calibration', True)).lower()}`",
-        "- Rule calibration only overwrites a model prediction when the primary candidate is strong, margin >= 3, counter-evidence is absent, and weak/uncertain evidence flags are not present.", "",
         "## Parser controls", "",
         f"- prefer_zeek: `{str(config['prefer_zeek']).lower()}`",
         f"- allow_tshark_fallback: `{str(config['allow_tshark_fallback']).lower()}`",
@@ -975,7 +807,6 @@ def main() -> int:
         "source_classification_records": 0, "pcap_level_records": 0,
         "prompts": 0, "predictions": 0, "failures": 0, "api_calls": 0,
         "candidate_rows": 0, "conflict_cases": 0,
-        "safe_calibration_considered": 0, "safe_calibrations_applied": 0, "safe_calibrations_skipped": 0,
     }
     try:
         records, _, record_to_pcap, evidence_stats = prepare_evidence(config, paths, pcaps)
@@ -992,9 +823,7 @@ def main() -> int:
         state["steps"]["prompts"] = "complete"
         write_json(output / "run_state.json", state)
         results, failures, api_calls = run_api(config, paths, records, manifest)
-        results, calibration_stats = apply_safe_calibration(config, records, results)
         stats.update({"predictions": len(results), "failures": len(failures), "api_calls": api_calls})
-        stats.update(calibration_stats)
         write_jsonl(output / "predictions.jsonl", results)
         write_jsonl(output / "failed_records.jsonl", failures)
         write_csv(output / "phase1_predictions.csv", official_rows(results, record_to_pcap))

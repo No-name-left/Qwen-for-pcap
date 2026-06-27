@@ -112,16 +112,6 @@ evidence profiles -> soft candidate scoring -> RAG -> LLM boundary decision
 
 `scripts/technique_profiles.py` 集中维护 8 类技术画像。规则分数不是最终硬分类器，而是把 PCAP 证据压缩成 top candidates、supporting evidence、counter evidence 和 weak-evidence flags，交给 RAG 和 LLM 做边界裁决。
 
-稳健性校准遵循保守原则：二进制、encoded、compressed、chunked 内容本身不是漏洞利用证据；正常下载、更新、CDN/static 资源、Steam/Valve depot/chunk 和大二进制响应会作为 TA01/TA11 反证。缺少 POST body 或 payload visibility 也不是正常流量证明，只表示可观测性缺口。单个 PHP/ASP/JSP 动态 POST 在没有 upload/drop/exploit/webshell/backdoor 证据时只作为弱 TA03/TA01 候选，并保留 TN01 与不确定性。
-
-默认 `enable_safe_calibration: true`。后模型校准只在 primary rule candidate 为 strong、`score_margin >= 3`、没有 primary counter-evidence、没有 weak/uncertain evidence flags，且模型置信不高或理由未处理反证时才覆盖模型技术码。可用以下开关调整：
-
-```bash
---disable-safe-calibration
---enable-safe-calibration
-PHASE1_ENABLE_SAFE_CALIBRATION=false
-```
-
 本地 Qwen/vLLM 默认关闭 thinking，以减少正文中出现推理文本导致 JSON 解析失败的风险。runner 发送的 OpenAI-compatible 扩展参数是：
 
 ```python
@@ -158,15 +148,15 @@ VM 默认 Docker image 为 `public.ecr.aws/zeek/zeek:8.0.6-arm64`。可用 `--ze
 | `parse_errors.jsonl` | Zeek/TShark 警告和解析失败 |
 | `session_cards/pcap_level_records.json` | PCAP 模式的一包一条聚合记录，包含 bounded/redacted 摘要、代表性证据、`candidate_technique_scores` / `primary_rule_candidate` / `rule_evidence` |
 | `session_cards/selected_records.json` | 进入 RAG、prompt 和 API 的最终记录；随 `granularity` 切换为 PCAP 或 session/group |
-| `candidate_scores.csv` | 每条最终记录的 top candidates、margin、strength、benign/profile 分数、payload gap、weak uncertainty、预测结果和 safe calibration 字段 |
-| `candidate_score_report.md` | 候选评分、benign-profile cases、payload-observability-gap cases、weak dynamic POST cases、model-vs-rule conflicts 与 calibration 汇总 |
+| `candidate_scores.csv` | 每条最终记录的 top candidates、margin、strength、预测结果和 conflict flags |
+| `candidate_score_report.md` | 候选评分与 conflict review 汇总 |
 | `conflict_cases.jsonl` | 规则候选、模型输出、弱证据或正常流量反证存在冲突的记录 |
 | `prompt_samples/` | 默认前 5 条 prompt 样本 |
 | `prompts/prompt_manifest.json` | RAG triggers、chunks 和 prompt budget 调试信息 |
 | `eval_report.md` | 提供答案表时的 Phase-1 指标 |
 | `confusion_matrix.csv` / `errors.csv` / `unmatched_rows.csv` | 评估明细 |
 
-Prompt 使用 `observable_timing_boundary_rag_v5`，Phase-1 stage-first、technique best-effort。PCAP 模式下 prompt 会明确要求“judging whole PCAP”，展示确定性的 `candidate_technique_scores`、`top_rule_candidates`、candidate evidence/counter-evidence、benign/profile 分数、payload-observability gap 和相关边界规则，并只输出整个 PCAP 的一个 `stage_code`。默认 RAG top-k 为 4，targeted boundary 优先；默认 prompt 上限为 6000 estimated tokens。超预算时先移除普通 RAG，再压缩应用摘要，最后才移除 boundary RAG，当前最终记录核心证据优先保留。
+Prompt 使用 `observable_timing_boundary_rag_v4`，Phase-1 stage-first、technique best-effort。PCAP 模式下 prompt 会明确要求“judging whole PCAP”，展示确定性的 `candidate_technique_scores`、`top_rule_candidates`、candidate evidence/counter-evidence 和相关边界规则，并只输出整个 PCAP 的一个 `stage_code`。默认 RAG top-k 为 4，targeted boundary 优先；默认 prompt 上限为 6000 estimated tokens。超预算时先移除普通 RAG，再压缩应用摘要，最后才移除 boundary RAG，当前最终记录核心证据优先保留。
 
 答案表只在推理结束后由评估器读取，不进入 session card、RAG query 或 prompt。评估器支持官方样例答案表列名 `攻击技术名称或正常流量`，并内置“正常流量、端口扫描、漏洞扫描、密码爆破、漏洞利用、植入后门、访问后门、木马回连”到 technique/stage 的映射。原始模型响应正文不落盘，只保存验证后的 JSON 与请求元数据。
 
@@ -185,8 +175,6 @@ Prompt 使用 `observable_timing_boundary_rag_v5`，Phase-1 stage-first、techni
 cat <out>/eval_report.md
 cat <out>/errors.csv
 cat <out>/candidate_scores.csv
-cat <out>/candidate_score_report.md
-cat <out>/conflict_cases.jsonl
 ```
 
 ## 7. 当前边界
