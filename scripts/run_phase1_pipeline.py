@@ -140,6 +140,7 @@ def effective_config(args: argparse.Namespace) -> dict[str, Any]:
         "pcap_id_source": config_value(data, args, "pcap_id_source", ["PHASE1_PCAP_ID_SOURCE"]),
         "submission_timezone": config_value(data, args, "submission_timezone", ["PHASE1_SUBMISSION_TIMEZONE"]),
         "official_metadata_source": config_value(data, args, "official_metadata_source", ["PHASE1_OFFICIAL_METADATA_SOURCE"]),
+        "submission_template": config_value(data, args, "submission_template", ["PHASE1_SUBMISSION_TEMPLATE"], Path),
         "dry_run": config_value(data, args, "dry_run", ["PHASE1_DRY_RUN"], as_bool),
         "resume": config_value(data, args, "resume", ["PHASE1_RESUME"], as_bool),
         "limit": config_value(data, args, "limit", ["PHASE1_LIMIT"], int),
@@ -187,6 +188,7 @@ def effective_config(args: argparse.Namespace) -> dict[str, Any]:
     values["input_dir"] = Path(values["input_dir"]).expanduser().resolve()
     values["output_dir"] = Path(values["output_dir"]).expanduser().resolve()
     values["answer"] = Path(values["answer"]).expanduser().resolve() if values.get("answer") else None
+    values["submission_template"] = Path(values["submission_template"]).expanduser().resolve() if values.get("submission_template") else None
     values["allow_remote_base_url"] = bool(args.allow_remote_base_url)
     values["config_path"] = config_path
     return values
@@ -206,6 +208,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pcap-id-source", choices=["pcap_id", "pcap_name", "filename_stem"], help="Official submission pcap编号 source. Defaults to pcap_id.")
     parser.add_argument("--submission-timezone", choices=["UTC", "Asia/Shanghai"], help="Official submission display timezone. Defaults to Asia/Shanghai.")
     parser.add_argument("--official-metadata-source", choices=["representative", "aggregate"], help="Official submission time/IP/port source. Defaults to representative sessions.")
+    parser.add_argument("--submission-template", type=Path, help="Optional official empty CSV/XLSX template whose metadata columns should be copied into the submission.")
     parser.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--limit", type=int)
@@ -241,6 +244,8 @@ def validate_config(config: dict[str, Any]) -> list[Path]:
         raise ValueError("submission_timezone must be either 'UTC' or 'Asia/Shanghai'")
     if config["official_metadata_source"] not in {"representative", "aggregate"}:
         raise ValueError("official_metadata_source must be either 'representative' or 'aggregate'")
+    if config.get("submission_template") and not config["submission_template"].is_file():
+        raise FileNotFoundError(f"submission template does not exist: {config['submission_template']}")
     input_dir = config["input_dir"]
     if not input_dir.is_dir():
         raise FileNotFoundError(f"input directory does not exist: {input_dir}")
@@ -773,6 +778,8 @@ def safe_config_report(config: dict[str, Any]) -> dict[str, Any]:
         "pcap_id_source": config.get("pcap_id_source", "pcap_id"),
         "submission_timezone": config.get("submission_timezone", "Asia/Shanghai"),
         "official_metadata_source": config.get("official_metadata_source", "representative"),
+        "submission_template_configured": bool(config.get("submission_template")),
+        "submission_template": str(config["submission_template"]) if config.get("submission_template") else "",
         "dry_run": config["dry_run"], "resume": config["resume"],
         "limit": config["limit"], "rag_top_k": config["rag_top_k"], "max_prompt_tokens": config["max_prompt_tokens"],
         "request_timeout": config["request_timeout"], "max_retries": config["max_retries"],
@@ -814,7 +821,11 @@ def write_summary(config: dict[str, Any], paths: dict[str, Path], stats: dict[st
         f"- submission_label_level: `{config.get('submission_label_level', 'stage')}`",
         f"- pcap_id_source: `{config.get('pcap_id_source', 'pcap_id')}`",
         f"- submission_timezone: `{config.get('submission_timezone', 'Asia/Shanghai')}`",
-        f"- official_metadata_source: `{config.get('official_metadata_source', 'representative')}`", "",
+        f"- official_metadata_source: `{config.get('official_metadata_source', 'representative')}`",
+        f"- submission_template_used: `{str(bool(config.get('submission_template'))).lower()}`",
+        f"- submission_template: `{config.get('submission_template') or ''}`",
+        f"- official_submission_csv: `{paths['official_submission_csv']}`",
+        f"- official_submission_xlsx: `{paths['official_submission_xlsx']}`", "",
         "## Parser controls", "",
         f"- prefer_zeek: `{str(config['prefer_zeek']).lower()}`",
         f"- allow_tshark_fallback: `{str(config['allow_tshark_fallback']).lower()}`",
@@ -875,6 +886,7 @@ def main() -> int:
             predictions=results,
             records_json=paths["selected"],
             parse_summary=paths["parse_summary"],
+            submission_template=config.get("submission_template"),
             output_csv=paths["official_submission_csv"],
             output_xlsx=paths["official_submission_xlsx"],
             submission_label_level=config["submission_label_level"],

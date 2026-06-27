@@ -119,9 +119,27 @@ TA43 / TA01 / TA03 / TA11 / TN01
 ```bash
 --submission-label-level stage|technique
 --pcap-id-source pcap_id|pcap_name|filename_stem
+--submission-timezone UTC|Asia/Shanghai
+--official-metadata-source representative|aggregate
+--submission-template <csv/xlsx>
 ```
 
-默认值为 `--submission-label-level stage --pcap-id-source pcap_id`。如果未来 Phase-2 需要技术编号，可改为 `--submission-label-level technique`，此时输出 `TA43_01`、`TA01_01`、`TA01_02`、`TA03_01`、`TA11_01`、`TA11_02`、`TN01_01` 等技术编号。
+默认值为 `--submission-label-level stage --pcap-id-source pcap_id --submission-timezone Asia/Shanghai --official-metadata-source representative`。无官方模板时推荐保持 `representative`，它会从 PCAP-level 代表性 session/group 中选择更具体的通信四元组，并降低 `1.1.1.1` / `2.2.2.2` 这类 placeholder-like endpoint 的优先级；`aggregate` 保留 PCAP 聚合字段，可能输出 `multiple`。
+
+如果主办方提供待填写模板，推荐使用：
+
+```bash
+bash run_phase1_vm.sh \
+  --input /data/competition_input/example-s3-pcaps \
+  --output-dir /data/outputs/qwen_for_pcap/phase1_run \
+  --submission-template /data/competition_input/submission_template.xlsx \
+  --base-url http://127.0.0.1:8000/v1 \
+  --model qwen3.5 \
+  --api-key EMPTY \
+  --no-dry-run
+```
+
+模板只用于复制 `pcap编号/文件名`、`开始时间`、`结束时间`、`源IP`、`源端口`、`目的IP`、`目的端口` 这些 metadata 列；即使模板中存在答案或标签列，也不会作为预测、训练或评估输入。最终只由模型输出填充 `攻击阶段编号或正常流量编号` 和 `研判理由（不计分）`。如果未来 Phase-2 需要技术编号，可改为 `--submission-label-level technique`，此时输出 `TA43_01`、`TA01_01`、`TA01_02`、`TA03_01`、`TA11_01`、`TA11_02`、`TN01_01` 等技术编号。
 
 PCAP 模式采用：
 
@@ -160,7 +178,7 @@ VM 默认 Docker image 为 `public.ecr.aws/zeek/zeek:8.0.6-arm64`。可用 `--ze
 
 | 路径 | 内容 |
 |---|---|
-| `official_submission.csv` | 官方提交 CSV，严格 9 列：`pcap编号`、`开始时间`、`结束时间`、`源IP`、`源端口`、`目的IP`、`目的端口`、`攻击阶段编号或正常流量编号`、`研判理由（不计分）` |
+| `official_submission.csv` | 官方提交 CSV，严格 9 列：`pcap编号`、`开始时间`、`结束时间`、`源IP`、`源端口`、`目的IP`、`目的端口`、`攻击阶段编号或正常流量编号`、`研判理由（不计分）`；默认代表性 metadata，可由 `--submission-template` 覆盖 metadata |
 | `official_submission.xlsx` | 如果 `openpyxl` 可用，同步生成的官方提交 Excel |
 | `phase1_predictions.csv` | 调试用 UTF-8 BOM CSV，包含 `pcap_id` / `pcap_name` / `record_id` / `record_type` / `stage_code` / `technique_guess` / `confidence` / `reason`，并保留官方中文核心列；不要直接作为官方提交表 |
 | `predictions.jsonl` | stage-first 结构及可选 `technique_guess` |
@@ -181,7 +199,7 @@ VM 默认 Docker image 为 `public.ecr.aws/zeek/zeek:8.0.6-arm64`。可用 `--ze
 
 Prompt 使用 `observable_timing_boundary_rag_v4`，Phase-1 stage-first、technique best-effort。PCAP 模式下 prompt 会明确要求“judging whole PCAP”，展示确定性的 `candidate_technique_scores`、`top_rule_candidates`、candidate evidence/counter-evidence 和相关边界规则，并只输出整个 PCAP 的一个 `stage_code`。默认 RAG top-k 为 4，targeted boundary 优先；默认 prompt 上限为 6000 estimated tokens。超预算时先移除普通 RAG，再压缩应用摘要，最后才移除 boundary RAG，当前最终记录核心证据优先保留。
 
-答案表只在推理结束后由评估器读取，不进入 session card、RAG query 或 prompt。评估器支持官方样例答案表列名 `攻击技术名称或正常流量`，并内置“正常流量、端口扫描、漏洞扫描、密码爆破、漏洞利用、植入后门、访问后门、木马回连”到 technique/stage 的映射。原始模型响应正文不落盘，只保存验证后的 JSON 与请求元数据。
+答案表只在推理结束后由评估器读取，不进入 session card、RAG query、prompt 或 official submission label 生成。不要把答案表作为训练、RAG、prompt 或推理输入。评估器支持官方样例答案表列名 `攻击技术名称或正常流量`，并内置“正常流量、端口扫描、漏洞扫描、密码爆破、漏洞利用、植入后门、访问后门、木马回连”到 technique/stage 的映射。原始模型响应正文不落盘，只保存验证后的 JSON 与请求元数据。
 
 ## 6. 常见问题
 
