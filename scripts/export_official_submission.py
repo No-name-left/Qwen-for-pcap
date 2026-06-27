@@ -6,7 +6,7 @@ import csv
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +29,8 @@ OFFICIAL_COLUMNS = [
 DEBUG_REASON_FIELDS = ["研判理由（不计入评分）", "研判理由（不计分）", "reason"]
 PCAP_ID_SOURCES = {"pcap_id", "pcap_name", "filename_stem"}
 SUBMISSION_LABEL_LEVELS = {"stage", "technique"}
+SUBMISSION_TIMEZONES = {"UTC", "Asia/Shanghai"}
+OFFICIAL_METADATA_SOURCES = {"representative", "aggregate"}
 EPOCH_MIN = 946684800
 EPOCH_MAX = 4102444800
 
@@ -43,6 +45,14 @@ def first_value(row: dict[str, Any], *keys: str) -> Any:
         if non_empty(value):
             return value
     return ""
+
+
+def first_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, dict):
+                return item
+    return value if isinstance(value, dict) else {}
 
 
 def load_json(path: Path, default: Any = None) -> Any:
@@ -112,23 +122,31 @@ def write_xlsx(path: Path, rows: list[dict[str, Any]]) -> bool:
     return True
 
 
-def format_epoch(value: float) -> str:
-    text = datetime.fromtimestamp(value, timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+def timezone_for_name(name: str) -> timezone:
+    if name == "UTC":
+        return timezone.utc
+    if name == "Asia/Shanghai":
+        return timezone(timedelta(hours=8), "Asia/Shanghai")
+    raise ValueError(f"submission_timezone must be one of {sorted(SUBMISSION_TIMEZONES)}")
+
+
+def format_epoch(value: float, submission_timezone: str) -> str:
+    text = datetime.fromtimestamp(value, timezone_for_name(submission_timezone)).strftime("%Y-%m-%d %H:%M:%S.%f")
     return text.rstrip("0").rstrip(".")
 
 
-def format_time(value: Any) -> str:
+def format_time(value: Any, submission_timezone: str = "Asia/Shanghai") -> str:
     if not non_empty(value):
         return ""
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return format_epoch(float(value)) if EPOCH_MIN <= float(value) <= EPOCH_MAX else f"{value:g}"
+        return format_epoch(float(value), submission_timezone) if EPOCH_MIN <= float(value) <= EPOCH_MAX else f"{value:g}"
     text = str(value).strip()
     try:
         number = float(text)
     except ValueError:
         return " ".join(text.split())
     if EPOCH_MIN <= number <= EPOCH_MAX:
-        return format_epoch(number)
+        return format_epoch(number, submission_timezone)
     if number.is_integer():
         return str(int(number))
     return f"{number:.6f}".rstrip("0").rstrip(".")
@@ -180,6 +198,110 @@ def scrub_reason(value: Any, max_chars: int) -> str:
     text = redact_sensitive_text(text, max_chars)
     text = re.sub(r"(?i)\b(api[_-]?key|secret[_-]?key|authorization)\s*[:=]\s*\S+", r"\1=[REDACTED]", text)
     return text[:max_chars]
+
+
+def cell_value(value: Any) -> str:
+    if not non_empty(value):
+        return ""
+    if isinstance(value, list):
+        return ",".join(str(item) for item in value if non_empty(item))
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value)
+
+
+def aggregate_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "start_time": first_value(row, "start_time", "开始时间", "ts"),
+        "end_time": first_value(row, "end_time", "结束时间"),
+        "src_ip": first_value(row, "src_ip", "源IP"),
+        "src_port": first_value(row, "src_port", "源端口"),
+        "dst_ip": first_value(row, "dst_ip", "目的IP"),
+        "dst_port": first_value(row, "dst_port", "目的端口"),
+    }
+
+
+def candidate_metadata(candidate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "start_time": first_value(candidate, "start_time", "scan_start", "ts"),
+        "end_time": first_value(candidate, "end_time", "scan_end"),
+        "src_ip": first_value(candidate, "src_ip", "源IP"),
+        "src_port": first_value(candidate, "src_port", "源端口"),
+        "dst_ip": first_value(candidate, "dst_ip", "目的IP"),
+        "dst_port": first_value(candidate, "dst_port", "目的端口"),
+    }
+
+
+def merge_metadata(preferred: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
+    return {key: preferred.get(key) if non_empty(preferred.get(key)) else fallback.get(key) for key in fallback}
+
+
+def compact_ports(values: Any, limit: int = 12) -> str:
+    if isinstance(values, list):
+        out: list[str] = []
+        for item in values:
+            value = item.get("value") if isinstance(item, dict) else item
+            if non_empty(value):
+                out.append(str(value))
+            if len(out) >= limit:
+                break
+        return ",".join(out)
+    return cell_value(values)
+
+
+def scan_port_metadata(row: dict[str, Any], candidate: dict[str, Any]) -> str:
+    for key in ("dst_ports_sample", "dst_ports", "ports", "dst_port_set"):
+        value = first_value(candidate, key)
+        if non_empty(value):
+            return compact_ports(value)
+    scan_summary = row.get("scan_group_summary") or {}
+    for key in ("dst_ports_sample", "dst_ports", "ports", "dst_port_set"):
+        value = first_value(scan_summary, key)
+        if non_empty(value):
+            return compact_ports(value)
+    if non_empty(row.get("top_dst_ports")):
+        return compact_ports(row.get("top_dst_ports"))
+    return cell_value(first_value(candidate, "dst_port"))
+
+
+def count_value(value: Any) -> int:
+    try:
+        return int(float(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def is_port_scan(row: dict[str, Any], stage: str, technique: str) -> bool:
+    scan_summary = row.get("scan_group_summary") or {}
+    primary = str(row.get("primary_rule_candidate") or "").upper()
+    scan_count = count_value(scan_summary.get("scan_like_record_count"))
+    return technique == "TA43_01" or primary == "TA43_01" or (not technique and stage == "TA43" and scan_count > 0)
+
+
+def representative_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    fallback = aggregate_metadata(row)
+    technique = normalize_technique(first_value(row, "technique_guess", "technique_code", "predicted_code"))
+    stage = normalize_stage(first_value(row, "stage_code", "攻击阶段编号或正常流量编号", "stage")) or stage_from_technique(technique)
+    if is_port_scan(row, stage, technique):
+        candidate = first_dict((row.get("scan_group_summary") or {}).get("top_records"))
+        preferred = candidate_metadata(candidate)
+        ports = scan_port_metadata(row, candidate)
+        if non_empty(ports):
+            preferred["dst_port"] = ports
+        return merge_metadata(preferred, fallback)
+    if stage == "TN01":
+        candidate = first_dict(row.get("representative_benign_context"))
+        return merge_metadata(candidate_metadata(candidate), fallback)
+    candidate = first_dict(row.get("top_suspicious_sessions"))
+    return merge_metadata(candidate_metadata(candidate), fallback)
+
+
+def official_metadata(row: dict[str, Any], source: str) -> dict[str, Any]:
+    if source == "aggregate":
+        return aggregate_metadata(row)
+    if source == "representative":
+        return representative_metadata(row)
+    raise ValueError(f"official_metadata_source must be one of {sorted(OFFICIAL_METADATA_SOURCES)}")
 
 
 def record_lookup(records_path: Path | None) -> dict[str, dict[str, Any]]:
@@ -242,26 +364,33 @@ def build_official_rows(
     pcap_names: dict[str, str] | None = None,
     pcap_id_source: str = "pcap_id",
     submission_label_level: str = "stage",
+    submission_timezone: str = "Asia/Shanghai",
+    official_metadata_source: str = "representative",
     max_reason_chars: int = 300,
 ) -> list[dict[str, Any]]:
     if pcap_id_source not in PCAP_ID_SOURCES:
         raise ValueError(f"pcap_id_source must be one of {sorted(PCAP_ID_SOURCES)}")
     if submission_label_level not in SUBMISSION_LABEL_LEVELS:
         raise ValueError(f"submission_label_level must be one of {sorted(SUBMISSION_LABEL_LEVELS)}")
+    if submission_timezone not in SUBMISSION_TIMEZONES:
+        raise ValueError(f"submission_timezone must be one of {sorted(SUBMISSION_TIMEZONES)}")
+    if official_metadata_source not in OFFICIAL_METADATA_SOURCES:
+        raise ValueError(f"official_metadata_source must be one of {sorted(OFFICIAL_METADATA_SOURCES)}")
     record_map = records or {}
     pcap_map = pcap_names or {}
     rows: list[dict[str, Any]] = []
     for prediction in predictions:
         row = merge_prediction_context(prediction, record_map, pcap_map)
         reason = first_value(row, *DEBUG_REASON_FIELDS)
+        metadata = official_metadata(row, official_metadata_source)
         rows.append({
             "pcap编号": pcap_number(row, pcap_id_source),
-            "开始时间": format_time(first_value(row, "start_time", "开始时间", "ts")),
-            "结束时间": format_time(first_value(row, "end_time", "结束时间")),
-            "源IP": first_value(row, "src_ip", "源IP"),
-            "源端口": first_value(row, "src_port", "源端口"),
-            "目的IP": first_value(row, "dst_ip", "目的IP"),
-            "目的端口": first_value(row, "dst_port", "目的端口"),
+            "开始时间": format_time(metadata.get("start_time"), submission_timezone),
+            "结束时间": format_time(metadata.get("end_time"), submission_timezone),
+            "源IP": cell_value(metadata.get("src_ip")),
+            "源端口": cell_value(metadata.get("src_port")),
+            "目的IP": cell_value(metadata.get("dst_ip")),
+            "目的端口": cell_value(metadata.get("dst_port")),
             "攻击阶段编号或正常流量编号": label_for_submission(row, submission_label_level),
             "研判理由（不计分）": scrub_reason(reason, max_reason_chars),
         })
@@ -313,6 +442,8 @@ def export_official_submission(
     output_xlsx: Path | None = None,
     submission_label_level: str = "stage",
     pcap_id_source: str = "pcap_id",
+    submission_timezone: str = "Asia/Shanghai",
+    official_metadata_source: str = "representative",
     max_reason_chars: int = 300,
     write_excel: bool = True,
 ) -> dict[str, Any]:
@@ -327,6 +458,8 @@ def export_official_submission(
         pcap_names=pcap_names,
         pcap_id_source=pcap_id_source,
         submission_label_level=submission_label_level,
+        submission_timezone=submission_timezone,
+        official_metadata_source=official_metadata_source,
         max_reason_chars=max_reason_chars,
     )
     write_csv(output_csv, rows)
@@ -341,6 +474,8 @@ def export_official_submission(
         "xlsx_written": xlsx_written,
         "submission_label_level": submission_label_level,
         "pcap_id_source": pcap_id_source,
+        "submission_timezone": submission_timezone,
+        "official_metadata_source": official_metadata_source,
     }
 
 
@@ -355,6 +490,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-xlsx", type=Path)
     parser.add_argument("--submission-label-level", choices=sorted(SUBMISSION_LABEL_LEVELS), default="stage")
     parser.add_argument("--pcap-id-source", choices=sorted(PCAP_ID_SOURCES), default="pcap_id")
+    parser.add_argument("--submission-timezone", choices=sorted(SUBMISSION_TIMEZONES), default="Asia/Shanghai")
+    parser.add_argument("--official-metadata-source", choices=sorted(OFFICIAL_METADATA_SOURCES), default="representative")
     parser.add_argument("--max-reason-chars", type=int, default=300)
     parser.add_argument("--no-xlsx", action="store_true", help="Skip XLSX export even if openpyxl is installed.")
     return parser.parse_args()
@@ -380,6 +517,8 @@ def main() -> int:
         output_xlsx=output_xlsx,
         submission_label_level=args.submission_label_level,
         pcap_id_source=args.pcap_id_source,
+        submission_timezone=args.submission_timezone,
+        official_metadata_source=args.official_metadata_source,
         max_reason_chars=args.max_reason_chars,
         write_excel=not args.no_xlsx,
     )

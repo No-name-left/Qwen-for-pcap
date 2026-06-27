@@ -11,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import run_phase1_pipeline as pipeline
 from build_pcap_level_records import build_pcap_records
 from build_qwen35_session_prompts import STAGE_CODES, TECHNIQUE_TO_STAGE, build_phase1_prompt
 from build_rag_query import detect_confusion_groups, record_terms, targeted_rag_metadata
@@ -305,10 +306,196 @@ class Phase1PromptTests(unittest.TestCase):
             self.assertEqual(row["pcap编号"], "phase1_001")
             self.assertEqual(row["攻击阶段编号或正常流量编号"], "TA11")
             self.assertEqual(row["研判理由（不计分）"], "Beacon timing and fixed remote endpoint are visible.")
-            self.assertEqual(row["开始时间"], "2011-08-10 09:08:48.170871")
+            self.assertEqual(row["开始时间"], "2011-08-10 17:08:48.170871")
+            self.assertNotIn("2026", row["开始时间"])
             self.assertNotIn("technique_guess", row)
             self.assertNotIn("confidence", row)
             self.assertNotIn("record_id", row)
+
+    def test_official_submission_timezone_can_switch_to_utc(self) -> None:
+        rows = build_official_rows(
+            [{
+                "record_id": "phase1_001::pcap",
+                "pcap_id": "phase1_001",
+                "stage_code": "TA11",
+                "technique_guess": "TA11_02",
+                "start_time": 1312967328.170871,
+                "end_time": 1312967329.0,
+                "reason": "Callback behavior.",
+            }],
+            submission_timezone="UTC",
+            official_metadata_source="aggregate",
+        )
+        self.assertEqual(rows[0]["开始时间"], "2011-08-10 09:08:48.170871")
+        self.assertEqual(rows[0]["结束时间"], "2011-08-10 09:08:49")
+        shanghai = build_official_rows(
+            [{
+                "record_id": "phase1_001::pcap",
+                "pcap_id": "phase1_001",
+                "stage_code": "TA11",
+                "technique_guess": "TA11_02",
+                "start_time": 1312967328.170871,
+                "end_time": 1312967329.0,
+                "reason": "Callback behavior.",
+            }],
+            submission_timezone="Asia/Shanghai",
+            official_metadata_source="aggregate",
+        )
+        self.assertEqual(shanghai[0]["开始时间"], "2011-08-10 17:08:48.170871")
+
+    def test_official_submission_representative_prefers_attack_session(self) -> None:
+        record = {
+            "record_id": "phase1_001::pcap",
+            "pcap_id": "phase1_001",
+            "record_type": "pcap",
+            "start_time": 1312967000.0,
+            "end_time": 1312968000.0,
+            "src_ip": "multiple",
+            "src_port": "multiple",
+            "dst_ip": "multiple",
+            "dst_port": "multiple",
+            "top_suspicious_sessions": [{
+                "record_id": "phase1_001::session::000007",
+                "start_time": 1312967328.170871,
+                "end_time": 1312967328.381522,
+                "src_ip": "147.32.84.165",
+                "src_port": 1274,
+                "dst_ip": "94.63.150.20",
+                "dst_port": 80,
+            }],
+        }
+        rows = build_official_rows(
+            [{
+                "record_id": "phase1_001::pcap",
+                "pcap_id": "phase1_001",
+                "stage_code": "TA11",
+                "technique_guess": "TA11_02",
+                "reason": "Suspicious callback.",
+            }],
+            records={record["record_id"]: record},
+        )
+        self.assertEqual(rows[0]["开始时间"], "2011-08-10 17:08:48.170871")
+        self.assertEqual(rows[0]["源IP"], "147.32.84.165")
+        self.assertEqual(rows[0]["源端口"], "1274")
+        self.assertEqual(rows[0]["目的IP"], "94.63.150.20")
+        self.assertEqual(rows[0]["目的端口"], "80")
+
+    def test_official_submission_aggregate_mode_keeps_multiple(self) -> None:
+        record = {
+            "record_id": "phase1_001::pcap",
+            "pcap_id": "phase1_001",
+            "record_type": "pcap",
+            "start_time": 1312967000.0,
+            "end_time": 1312968000.0,
+            "src_ip": "multiple",
+            "src_port": "multiple",
+            "dst_ip": "multiple",
+            "dst_port": "multiple",
+            "top_suspicious_sessions": [{
+                "start_time": 1312967328.170871,
+                "src_ip": "147.32.84.165",
+                "src_port": 1274,
+                "dst_ip": "94.63.150.20",
+                "dst_port": 80,
+            }],
+        }
+        rows = build_official_rows(
+            [{
+                "record_id": "phase1_001::pcap",
+                "pcap_id": "phase1_001",
+                "stage_code": "TA11",
+                "technique_guess": "TA11_02",
+                "reason": "Suspicious callback.",
+            }],
+            records={record["record_id"]: record},
+            official_metadata_source="aggregate",
+        )
+        self.assertEqual(rows[0]["开始时间"], "2011-08-10 17:03:20")
+        self.assertEqual(rows[0]["源IP"], "multiple")
+        self.assertEqual(rows[0]["源端口"], "multiple")
+        self.assertEqual(rows[0]["目的IP"], "multiple")
+        self.assertEqual(rows[0]["目的端口"], "multiple")
+
+    def test_official_submission_scan_uses_scan_representative_and_ports(self) -> None:
+        record = {
+            "record_id": "phase1_001::pcap",
+            "pcap_id": "phase1_001",
+            "record_type": "pcap",
+            "start_time": 1312967000.0,
+            "end_time": 1312968000.0,
+            "src_ip": "multiple",
+            "src_port": "multiple",
+            "dst_ip": "multiple",
+            "dst_port": "multiple",
+            "primary_rule_candidate": "TA43_01",
+            "top_dst_ports": [{"value": 22, "count": 3}, {"value": 80, "count": 2}, {"value": 443, "count": 1}],
+            "scan_group_summary": {
+                "scan_like_record_count": 1,
+                "top_records": [{
+                    "record_id": "phase1_001::scan_group::000001",
+                    "start_time": 1312967100.0,
+                    "end_time": 1312967110.0,
+                    "src_ip": "10.0.0.5",
+                    "src_port": "multiple",
+                    "dst_ip": "10.0.0.9",
+                    "dst_port": "multiple",
+                }],
+            },
+        }
+        rows = build_official_rows(
+            [{
+                "record_id": "phase1_001::pcap",
+                "pcap_id": "phase1_001",
+                "stage_code": "TA43",
+                "technique_guess": "TA43_01",
+                "reason": "Port fanout.",
+            }],
+            records={record["record_id"]: record},
+        )
+        self.assertEqual(rows[0]["源IP"], "10.0.0.5")
+        self.assertEqual(rows[0]["目的IP"], "10.0.0.9")
+        self.assertEqual(rows[0]["目的端口"], "22,80,443")
+
+    def test_official_submission_normal_prefers_benign_context(self) -> None:
+        record = {
+            "record_id": "phase1_001::pcap",
+            "pcap_id": "phase1_001",
+            "record_type": "pcap",
+            "start_time": 1312967000.0,
+            "end_time": 1312968000.0,
+            "src_ip": "multiple",
+            "src_port": "multiple",
+            "dst_ip": "multiple",
+            "dst_port": "multiple",
+            "representative_benign_context": [{
+                "record_id": "phase1_001::session::000001",
+                "start_time": 1312967200.0,
+                "end_time": 1312967201.0,
+                "src_ip": "192.0.2.10",
+                "src_port": 53000,
+                "dst_ip": "198.51.100.20",
+                "dst_port": 443,
+            }],
+            "top_suspicious_sessions": [{
+                "src_ip": "203.0.113.1",
+                "dst_ip": "203.0.113.2",
+                "dst_port": 4444,
+            }],
+        }
+        rows = build_official_rows(
+            [{
+                "record_id": "phase1_001::pcap",
+                "pcap_id": "phase1_001",
+                "stage_code": "TN01",
+                "technique_guess": "TN01_01",
+                "reason": "No attack indicators.",
+            }],
+            records={record["record_id"]: record},
+        )
+        self.assertEqual(rows[0]["源IP"], "192.0.2.10")
+        self.assertEqual(rows[0]["源端口"], "53000")
+        self.assertEqual(rows[0]["目的IP"], "198.51.100.20")
+        self.assertEqual(rows[0]["目的端口"], "443")
 
     def test_official_submission_can_export_technique_level(self) -> None:
         rows = build_official_rows(
@@ -372,6 +559,120 @@ class Phase1PromptTests(unittest.TestCase):
             )
             self.assertIn("official_submission.csv", result.stdout)
             self.assertTrue((root / "official_submission.csv").exists())
+
+    def test_pipeline_without_answer_exports_official_submission_and_skips_evaluator(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "out"
+            record = {
+                "record_id": "phase1_001::pcap",
+                "pcap_id": "phase1_001",
+                "pcap_name": "sample01.pcap",
+                "record_type": "pcap",
+                "start_time": 1312967000.0,
+                "end_time": 1312968000.0,
+                "src_ip": "multiple",
+                "src_port": "multiple",
+                "dst_ip": "multiple",
+                "dst_port": "multiple",
+                "top_suspicious_sessions": [{
+                    "start_time": 1312967328.170871,
+                    "end_time": 1312967328.381522,
+                    "src_ip": "147.32.84.165",
+                    "src_port": 1274,
+                    "dst_ip": "94.63.150.20",
+                    "dst_port": 80,
+                }],
+            }
+            result = {
+                "record_id": record["record_id"],
+                "pcap_id": record["pcap_id"],
+                "record_type": "pcap",
+                "stage_code": "TA11",
+                "technique_guess": "TA11_02",
+                "confidence": 0.85,
+                "reason": "Suspicious callback.",
+            }
+            config = {
+                "input_dir": root / "input",
+                "output_dir": output,
+                "base_url": "http://127.0.0.1:8000/v1",
+                "model": "qwen3.5",
+                "api_key": "EMPTY",
+                "answer": None,
+                "granularity": "pcap",
+                "submission_label_level": "stage",
+                "pcap_id_source": "pcap_id",
+                "submission_timezone": "Asia/Shanghai",
+                "official_metadata_source": "representative",
+                "dry_run": False,
+                "resume": False,
+                "limit": 0,
+                "rag_top_k": 4,
+                "max_prompt_tokens": 6000,
+                "request_timeout": 120,
+                "max_retries": 0,
+                "enable_thinking": False,
+                "prefer_zeek": True,
+                "allow_tshark_fallback": True,
+                "enable_tshark_observable_supplement": True,
+                "zeek_docker_image": "",
+                "save_prompt_samples": False,
+                "prompt_sample_limit": 0,
+                "enable_critic": False,
+                "critic_only_on_conflict": True,
+                "allow_remote_base_url": False,
+                "config_path": root / "config.yaml",
+            }
+
+            def fake_prepare_evidence(_config, paths, _pcaps):
+                paths["selected"].parent.mkdir(parents=True, exist_ok=True)
+                paths["selected"].write_text(json.dumps([record], ensure_ascii=False), encoding="utf-8")
+                paths["parse_summary"].parent.mkdir(parents=True, exist_ok=True)
+                paths["parse_summary"].write_text(json.dumps([{
+                    "case_id": "phase1_001",
+                    "pcap_path": "/inputs/sample01.pcap",
+                }], ensure_ascii=False), encoding="utf-8")
+                return [record], {"phase1_001": "sample01.pcap"}, {record["record_id"]: "sample01.pcap"}, {
+                    "source_session_cards": 1,
+                    "source_classification_records": 1,
+                    "pcap_level_records": 1,
+                    "selected_records": 1,
+                }
+
+            def fake_write_xlsx(path, rows):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+                return True
+
+            run_labels: list[str] = []
+
+            def fake_run_command(label, command):
+                run_labels.append(label)
+                if label.startswith("evaluate"):
+                    raise AssertionError("evaluator should not run without --answer")
+
+            with (
+                patch.object(pipeline, "parse_args", return_value=SimpleNamespace()),
+                patch.object(pipeline, "effective_config", return_value=config),
+                patch.object(pipeline, "validate_config", return_value=[root / "input" / "sample01.pcap"]),
+                patch.object(pipeline, "prepare_evidence", side_effect=fake_prepare_evidence),
+                patch.object(pipeline, "prepare_rag", return_value=[]),
+                patch.object(pipeline, "prepare_prompts", return_value=[{"record_id": record["record_id"], "estimated_prompt_tokens": 1000, "rag_chunks_included": 0}]),
+                patch.object(pipeline, "run_api", return_value=([result], [], 1)),
+                patch.object(pipeline, "run_command", side_effect=fake_run_command),
+                patch("export_official_submission.write_xlsx", side_effect=fake_write_xlsx),
+            ):
+                status = pipeline.main()
+
+            self.assertEqual(status, 0)
+            self.assertTrue((output / "official_submission.csv").exists())
+            self.assertTrue((output / "official_submission.xlsx").exists())
+            self.assertFalse(any(label.startswith("evaluate") for label in run_labels))
+            with (output / "official_submission.csv").open("r", encoding="utf-8-sig", newline="") as handle:
+                row = next(csv.DictReader(handle))
+            self.assertEqual(row["源IP"], "147.32.84.165")
+            self.assertEqual(row["攻击阶段编号或正常流量编号"], "TA11")
 
     def test_official_xlsx_generation_when_openpyxl_available(self) -> None:
         try:
