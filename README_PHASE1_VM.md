@@ -9,6 +9,10 @@
 /data/outputs/qwen_for_pcap
 ```
 
+当前 Phase-1 默认行为来自稳定版本 `8b6d3bb Refine PCAP-level evidence profiles and boundary scoring`：PCAP-level candidate scoring、prompt、RAG 和推理链路保持该版本的默认行为。实验提交 `32da70c Calibrate PCAP-level benign and weak-evidence decisions` 中的 safe calibration 不作为默认行为，也不参与默认推理链路。
+
+分支策略：`main` 是长期稳定主干，`phase1-vm-runner` 作为比赛 VM 验证/冻结分支保留到比赛结束。VM 可以继续拉取 `phase1-vm-runner`，正式回退建议优先使用稳定 tag/commit。
+
 ## 1. 检查数据盘
 
 在堡垒机 Web 终端中先执行：
@@ -104,6 +108,21 @@ bash run_phase1_vm.sh \
 
 `--limit` 作用于最终输出粒度：PCAP 模式下限制 PCAP 数，session 模式下限制 session/group records 数。等价环境变量为 `PHASE1_GRANULARITY=pcap|session`。
 
+官方提交默认输出阶段编号：
+
+```text
+TA43 / TA01 / TA03 / TA11 / TN01
+```
+
+可用以下参数控制官方导出，不影响调试 CSV：
+
+```bash
+--submission-label-level stage|technique
+--pcap-id-source pcap_id|pcap_name|filename_stem
+```
+
+默认值为 `--submission-label-level stage --pcap-id-source pcap_id`。如果未来 Phase-2 需要技术编号，可改为 `--submission-label-level technique`，此时输出 `TA43_01`、`TA01_01`、`TA01_02`、`TA03_01`、`TA11_01`、`TA11_02`、`TN01_01` 等技术编号。
+
 PCAP 模式采用：
 
 ```text
@@ -141,7 +160,9 @@ VM 默认 Docker image 为 `public.ecr.aws/zeek/zeek:8.0.6-arm64`。可用 `--ze
 
 | 路径 | 内容 |
 |---|---|
-| `phase1_predictions.csv` | UTF-8 BOM，包含 `pcap_id` / `pcap_name` / `record_id` / `record_type` / `stage_code` / `technique_guess` / `confidence` / `reason`，并保留官方中文核心列 |
+| `official_submission.csv` | 官方提交 CSV，严格 9 列：`pcap编号`、`开始时间`、`结束时间`、`源IP`、`源端口`、`目的IP`、`目的端口`、`攻击阶段编号或正常流量编号`、`研判理由（不计分）` |
+| `official_submission.xlsx` | 如果 `openpyxl` 可用，同步生成的官方提交 Excel |
+| `phase1_predictions.csv` | 调试用 UTF-8 BOM CSV，包含 `pcap_id` / `pcap_name` / `record_id` / `record_type` / `stage_code` / `technique_guess` / `confidence` / `reason`，并保留官方中文核心列；不要直接作为官方提交表 |
 | `predictions.jsonl` | stage-first 结构及可选 `technique_guess` |
 | `run_summary.md` / `run.log` | 汇总与逐步日志，不含 API key |
 | `failed_records.jsonl` | API 或 JSON 解析失败记录 |
@@ -155,6 +176,8 @@ VM 默认 Docker image 为 `public.ecr.aws/zeek/zeek:8.0.6-arm64`。可用 `--ze
 | `prompts/prompt_manifest.json` | RAG triggers、chunks 和 prompt budget 调试信息 |
 | `eval_report.md` | 提供答案表时的 Phase-1 指标 |
 | `confusion_matrix.csv` / `errors.csv` / `unmatched_rows.csv` | 评估明细 |
+
+提交用文件是 `official_submission.csv` / `official_submission.xlsx`。调试用文件包括 `phase1_predictions.csv`、`candidate_scores.csv`、`eval_report.md`、`errors.csv`、`predictions.jsonl` 和 `candidate_score_report.md`。
 
 Prompt 使用 `observable_timing_boundary_rag_v4`，Phase-1 stage-first、technique best-effort。PCAP 模式下 prompt 会明确要求“judging whole PCAP”，展示确定性的 `candidate_technique_scores`、`top_rule_candidates`、candidate evidence/counter-evidence 和相关边界规则，并只输出整个 PCAP 的一个 `stage_code`。默认 RAG top-k 为 4，targeted boundary 优先；默认 prompt 上限为 6000 estimated tokens。超预算时先移除普通 RAG，再压缩应用摘要，最后才移除 boundary RAG，当前最终记录核心证据优先保留。
 

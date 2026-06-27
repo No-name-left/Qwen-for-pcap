@@ -24,6 +24,7 @@ from build_qwen35_session_prompts import (
     TECHNIQUE_TO_STAGE,
     build_phase1_prompt,
 )
+from export_official_submission import export_official_submission
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -135,6 +136,8 @@ def effective_config(args: argparse.Namespace) -> dict[str, Any]:
         "api_key": config_value(data, args, "api_key", ["LLM_API_KEY", "API_KEY", "OPENAI_API_KEY"]),
         "answer": config_value(data, args, "answer", ["PHASE1_ANSWER"], Path),
         "granularity": config_value(data, args, "granularity", ["PHASE1_GRANULARITY"]),
+        "submission_label_level": config_value(data, args, "submission_label_level", ["PHASE1_SUBMISSION_LABEL_LEVEL"]),
+        "pcap_id_source": config_value(data, args, "pcap_id_source", ["PHASE1_PCAP_ID_SOURCE"]),
         "dry_run": config_value(data, args, "dry_run", ["PHASE1_DRY_RUN"], as_bool),
         "resume": config_value(data, args, "resume", ["PHASE1_RESUME"], as_bool),
         "limit": config_value(data, args, "limit", ["PHASE1_LIMIT"], int),
@@ -163,6 +166,12 @@ def effective_config(args: argparse.Namespace) -> dict[str, Any]:
     if values["granularity"] is None:
         values["granularity"] = "pcap"
     values["granularity"] = str(values["granularity"]).strip().lower()
+    if values["submission_label_level"] is None:
+        values["submission_label_level"] = "stage"
+    values["submission_label_level"] = str(values["submission_label_level"]).strip().lower()
+    if values["pcap_id_source"] is None:
+        values["pcap_id_source"] = "pcap_id"
+    values["pcap_id_source"] = str(values["pcap_id_source"]).strip().lower()
     if values["enable_critic"] is None:
         values["enable_critic"] = False
     if values["critic_only_on_conflict"] is None:
@@ -185,6 +194,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--api-key")
     parser.add_argument("--answer", type=Path)
     parser.add_argument("--granularity", choices=["pcap", "session"], help="Final output granularity. pcap builds one prompt/prediction per PCAP; session preserves existing per-record behavior.")
+    parser.add_argument("--submission-label-level", choices=["stage", "technique"], help="Official submission label granularity. Defaults to stage for Phase-1.")
+    parser.add_argument("--pcap-id-source", choices=["pcap_id", "pcap_name", "filename_stem"], help="Official submission pcap编号 source. Defaults to pcap_id.")
     parser.add_argument("--dry-run", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--limit", type=int)
@@ -212,6 +223,10 @@ def validate_config(config: dict[str, Any]) -> list[Path]:
         raise ValueError("limit must be >=0, rag_top_k >=1, and max_prompt_tokens >=1000")
     if config["granularity"] not in {"pcap", "session"}:
         raise ValueError("granularity must be either 'pcap' or 'session'")
+    if config["submission_label_level"] not in {"stage", "technique"}:
+        raise ValueError("submission_label_level must be either 'stage' or 'technique'")
+    if config["pcap_id_source"] not in {"pcap_id", "pcap_name", "filename_stem"}:
+        raise ValueError("pcap_id_source must be one of 'pcap_id', 'pcap_name', or 'filename_stem'")
     input_dir = config["input_dir"]
     if not input_dir.is_dir():
         raise FileNotFoundError(f"input directory does not exist: {input_dir}")
@@ -260,6 +275,8 @@ def step_paths(output: Path) -> dict[str, Path]:
         "candidate_score_report": output / "candidate_score_report.md",
         "conflict_cases": output / "conflict_cases.jsonl",
         "critic_prompts": output / "critic_review_prompts",
+        "official_submission_csv": output / "official_submission.csv",
+        "official_submission_xlsx": output / "official_submission.xlsx",
     }
 
 
@@ -738,6 +755,8 @@ def safe_config_report(config: dict[str, Any]) -> dict[str, Any]:
         "input_dir": str(config["input_dir"]), "output_dir": str(config["output_dir"]),
         "base_url": safe_url, "model": config["model"], "api_key_configured": bool(config.get("api_key")),
         "answer_configured": bool(config.get("answer")), "granularity": config.get("granularity", "pcap"),
+        "submission_label_level": config.get("submission_label_level", "stage"),
+        "pcap_id_source": config.get("pcap_id_source", "pcap_id"),
         "dry_run": config["dry_run"], "resume": config["resume"],
         "limit": config["limit"], "rag_top_k": config["rag_top_k"], "max_prompt_tokens": config["max_prompt_tokens"],
         "request_timeout": config["request_timeout"], "max_retries": config["max_retries"],
@@ -763,6 +782,8 @@ def write_summary(config: dict[str, Any], paths: dict[str, Path], stats: dict[st
         f"- PCAP-level records: {stats.get('pcap_level_records', 0)}",
         f"- Classification records selected for prompting: {stats.get('records', 0)}",
         f"- Prompts built: {stats.get('prompts', 0)}", f"- Predictions: {stats.get('predictions', 0)}",
+        f"- Official submission rows: {stats.get('official_submission_rows', 0)}",
+        f"- Official submission XLSX written: `{str(stats.get('official_xlsx_written', False)).lower()}`",
         f"- Candidate score rows: {stats.get('candidate_rows', 0)}", f"- Conflict cases: {stats.get('conflict_cases', 0)}",
         f"- Failed records: {stats.get('failures', 0)}", f"- API requests attempted: {stats.get('api_calls', 0)}",
         f"- Prompt profile: `{PROMPT_VERSION}`", f"- Maximum estimated prompt tokens: {stats.get('max_prompt_tokens', 0)} / {config['max_prompt_tokens']}",
@@ -773,6 +794,9 @@ def write_summary(config: dict[str, Any], paths: dict[str, Path], stats: dict[st
         "## Critic controls", "",
         f"- enable_critic: `{str(config.get('enable_critic', False)).lower()}`",
         f"- critic_only_on_conflict: `{str(config.get('critic_only_on_conflict', True)).lower()}`", "",
+        "## Submission export controls", "",
+        f"- submission_label_level: `{config.get('submission_label_level', 'stage')}`",
+        f"- pcap_id_source: `{config.get('pcap_id_source', 'pcap_id')}`", "",
         "## Parser controls", "",
         f"- prefer_zeek: `{str(config['prefer_zeek']).lower()}`",
         f"- allow_tshark_fallback: `{str(config['allow_tshark_fallback']).lower()}`",
@@ -783,6 +807,7 @@ def write_summary(config: dict[str, Any], paths: dict[str, Path], stats: dict[st
         "- No raw model response body is persisted; only validated JSON and response metadata are stored.",
         "- API credentials are omitted from logs and generated configuration reports.", "",
         "## Primary outputs", "",
+        "- `official_submission.csv`", "- `official_submission.xlsx`",
         "- `phase1_predictions.csv`", "- `predictions.jsonl`", "- `failed_records.jsonl`",
         "- `parse_errors.jsonl`", "- `candidate_scores.csv`", "- `candidate_score_report.md`",
         "- `conflict_cases.jsonl`", "- `prompt_samples/`", "- `prompts/prompt_manifest.json`", "",
@@ -807,6 +832,7 @@ def main() -> int:
         "source_classification_records": 0, "pcap_level_records": 0,
         "prompts": 0, "predictions": 0, "failures": 0, "api_calls": 0,
         "candidate_rows": 0, "conflict_cases": 0,
+        "official_submission_rows": 0, "official_xlsx_written": False,
     }
     try:
         records, _, record_to_pcap, evidence_stats = prepare_evidence(config, paths, pcaps)
@@ -827,6 +853,17 @@ def main() -> int:
         write_jsonl(output / "predictions.jsonl", results)
         write_jsonl(output / "failed_records.jsonl", failures)
         write_csv(output / "phase1_predictions.csv", official_rows(results, record_to_pcap))
+        export_stats = export_official_submission(
+            predictions=results,
+            records_json=paths["selected"],
+            parse_summary=paths["parse_summary"],
+            output_csv=paths["official_submission_csv"],
+            output_xlsx=paths["official_submission_xlsx"],
+            submission_label_level=config["submission_label_level"],
+            pcap_id_source=config["pcap_id_source"],
+        )
+        stats["official_submission_rows"] = export_stats["rows"]
+        stats["official_xlsx_written"] = export_stats["xlsx_written"]
         stats.update(write_candidate_diagnostics(config, paths, records, results, record_to_pcap))
         state["steps"]["api"] = "skipped_dry_run" if config["dry_run"] else "complete"
         state["steps"]["candidate_diagnostics"] = "complete"

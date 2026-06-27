@@ -7,6 +7,8 @@ answer: null
 phase: phase1
 prompt_profile: observable_timing_boundary_rag_v4
 granularity: pcap
+submission_label_level: stage
+pcap_id_source: pcap_id
 dry_run: false
 resume: true
 limit: 0

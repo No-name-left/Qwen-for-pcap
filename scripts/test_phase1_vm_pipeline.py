@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -14,6 +15,7 @@ from build_pcap_level_records import build_pcap_records
 from build_qwen35_session_prompts import STAGE_CODES, TECHNIQUE_TO_STAGE, build_phase1_prompt
 from build_rag_query import detect_confusion_groups, record_terms, targeted_rag_metadata
 from evaluate_phase1_predictions import evaluate
+from export_official_submission import OFFICIAL_COLUMNS, build_official_rows, export_official_submission
 from parse_public_pcaps import discover_pcaps, parse_case
 from run_phase1_pipeline import official_rows, qwen_extra_body, run_api, safe_config_report, validate_prediction, write_candidate_diagnostics
 from technique_profiles import TECHNIQUE_PROFILES, technique_codes, validate_profiles
@@ -262,6 +264,162 @@ class Phase1PromptTests(unittest.TestCase):
         )[0]
         self.assertEqual(session_row["record_type"], "session")
         self.assertEqual(session_row["stage_code"], "TN01")
+
+    def test_official_submission_csv_is_strict_stage_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            records = root / "selected_records.json"
+            records.write_text(json.dumps([{
+                "record_id": "phase1_001::pcap",
+                "pcap_id": "phase1_001",
+                "pcap_name": "sample01.pcap",
+                "start_time": 1312967328.170871,
+                "end_time": 1312967330.0,
+                "src_ip": "multiple",
+                "src_port": "multiple",
+                "dst_ip": "multiple",
+                "dst_port": "multiple",
+            }], ensure_ascii=False), encoding="utf-8")
+            predictions = [{
+                "record_id": "phase1_001::pcap",
+                "pcap_id": "phase1_001",
+                "record_type": "pcap",
+                "stage_code": "",
+                "technique_guess": "TA11_02",
+                "confidence": 0.86,
+                "reason": "Beacon timing and fixed remote endpoint are visible.",
+            }]
+            csv_path = root / "official_submission.csv"
+            stats = export_official_submission(
+                predictions=predictions,
+                records_json=records,
+                output_csv=csv_path,
+                output_xlsx=root / "official_submission.xlsx",
+            )
+
+            self.assertEqual(stats["rows"], 1)
+            with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                reader = csv.DictReader(handle)
+                self.assertEqual(reader.fieldnames, OFFICIAL_COLUMNS)
+                row = next(reader)
+            self.assertEqual(row["pcap编号"], "phase1_001")
+            self.assertEqual(row["攻击阶段编号或正常流量编号"], "TA11")
+            self.assertEqual(row["研判理由（不计分）"], "Beacon timing and fixed remote endpoint are visible.")
+            self.assertEqual(row["开始时间"], "2011-08-10 09:08:48.170871")
+            self.assertNotIn("technique_guess", row)
+            self.assertNotIn("confidence", row)
+            self.assertNotIn("record_id", row)
+
+    def test_official_submission_can_export_technique_level(self) -> None:
+        rows = build_official_rows(
+            [{
+                "record_id": "phase1_001::pcap",
+                "pcap_id": "phase1_001",
+                "pcap_name": "sample01.pcap",
+                "stage_code": "TA11",
+                "technique_guess": "TA11_02",
+                "reason": "Callback behavior.",
+            }],
+            submission_label_level="technique",
+            pcap_id_source="filename_stem",
+        )
+        self.assertEqual(rows[0]["pcap编号"], "sample01")
+        self.assertEqual(rows[0]["攻击阶段编号或正常流量编号"], "TA11_02")
+        self.assertEqual(rows[0]["研判理由（不计分）"], "Callback behavior.")
+
+    def test_phase1_predictions_remains_debug_output(self) -> None:
+        rows = official_rows(
+            [{
+                "record_id": "phase1_001::pcap", "pcap_id": "phase1_001", "record_type": "pcap",
+                "stage_code": "TA43", "technique_guess": "TA43_01", "confidence": 0.9,
+                "reason": "Port fanout.",
+            }],
+            {"phase1_001::pcap": "sample01.pcap"},
+        )
+        self.assertIn("technique_guess", rows[0])
+        self.assertIn("confidence", rows[0])
+        self.assertIn("record_id", rows[0])
+        self.assertIn("研判理由（不计入评分）", rows[0])
+        official = build_official_rows(rows)
+        self.assertEqual(set(official[0]), set(OFFICIAL_COLUMNS))
+
+    def test_output_dir_export_uses_pipeline_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "session_cards").mkdir()
+            (root / "predictions.jsonl").write_text(json.dumps({
+                "record_id": "phase1_001::pcap",
+                "pcap_id": "phase1_001",
+                "record_type": "pcap",
+                "stage_code": "TN01",
+                "technique_guess": "TN01_01",
+                "reason": "No attack indicators are visible.",
+            }, ensure_ascii=False) + "\n", encoding="utf-8")
+            (root / "session_cards" / "selected_records.json").write_text(json.dumps([{
+                "record_id": "phase1_001::pcap",
+                "pcap_id": "phase1_001",
+                "pcap_name": "normal.pcap",
+                "src_ip": "multiple",
+                "src_port": "multiple",
+                "dst_ip": "multiple",
+                "dst_port": "multiple",
+            }], ensure_ascii=False), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve().parent / "export_official_submission.py"), "--output-dir", str(root)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            self.assertIn("official_submission.csv", result.stdout)
+            self.assertTrue((root / "official_submission.csv").exists())
+
+    def test_official_xlsx_generation_when_openpyxl_available(self) -> None:
+        try:
+            import openpyxl  # noqa: F401
+        except ImportError:
+            self.skipTest("openpyxl is not installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stats = export_official_submission(
+                predictions=[{
+                    "record_id": "phase1_001::pcap",
+                    "pcap_id": "phase1_001",
+                    "stage_code": "TA43",
+                    "technique_guess": "TA43_01",
+                    "reason": "Scan fanout.",
+                }],
+                output_csv=root / "official_submission.csv",
+                output_xlsx=root / "official_submission.xlsx",
+            )
+            self.assertTrue(stats["xlsx_written"])
+            self.assertTrue((root / "official_submission.xlsx").exists())
+
+    def test_offline_readiness_script_runs_without_network(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve().parent / "check_offline_readiness.py"),
+                "--soft",
+                "--no-check-api",
+            ],
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        self.assertIn("Offline readiness", result.stdout)
+        self.assertNotIn("api-key", result.stdout.lower())
+
+    def test_unstable_safe_calibration_default_is_not_present(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        for relative in (
+            "configs/phase1_vm.yaml",
+            "scripts/run_phase1_pipeline.py",
+            "scripts/build_pcap_level_records.py",
+            "scripts/build_qwen35_session_prompts.py",
+            "scripts/build_rag_query.py",
+        ):
+            text = (root / relative).read_text(encoding="utf-8")
+            self.assertNotIn("safe_calibration", text)
 
     def test_pcap_candidate_scores_capture_attack_priors(self) -> None:
         exploit = one_pcap_record([{
